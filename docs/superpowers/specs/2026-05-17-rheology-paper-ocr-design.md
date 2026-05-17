@@ -27,7 +27,7 @@ Useful flags:
 ```bash
 rheology-paper-ocr run <pdf_dir> \
   --out ./outputs/run-001 \
-  --model anthropic/claude-sonnet-4.5 \
+  --model anthropic/claude-sonnet-4.6 \
   --max-papers 50 \
   --resume
 ```
