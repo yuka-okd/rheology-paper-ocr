@@ -28,6 +28,9 @@ For the recommended hybrid mode, install the optional local figure locator. It
 uses Docling to find figures, render an exact high-resolution crop, and recover
 the caption before sending the crop plus page context to the vision model.
 Without it, the pipeline falls back to full candidate pages.
+The local classifier also records chart type and native vector text in the
+per-paper figure metadata, while conservatively skipping captioned morphology
+and fibre-size figures.
 
 ```bash
 python3 -m pip install -e '.[docling]'

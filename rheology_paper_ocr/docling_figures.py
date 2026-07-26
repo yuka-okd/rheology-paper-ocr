@@ -24,6 +24,21 @@ CHART_CAPTION_KEYWORDS = (
     "tan delta",
 )
 
+NON_RHEOLOGY_CAPTION_RULES = (
+    ("schematic", "schematic figure"),
+    ("morphology", "fibre morphology figure"),
+    ("fiber morphology", "fibre morphology figure"),
+    ("fibre morphology", "fibre morphology figure"),
+    ("fiber diameter", "fibre diameter figure"),
+    ("fibre diameter", "fibre diameter figure"),
+    ("fiber size", "fibre size figure"),
+    ("fibre size", "fibre size figure"),
+    ("diameter of electrospun", "fibre diameter figure"),
+)
+
+CHART_PICTURE_TYPES = {"line_chart", "scatter_plot", "bar_chart", "box_plot", "pie_chart"}
+PICTURE_CLASSIFICATION_CONFIDENCE = 0.8
+
 
 class DoclingFigureError(RuntimeError):
     """Raised when optional local figure localization cannot complete."""
@@ -37,11 +52,32 @@ class LocalizedFigure:
     crop_path: Path
     bbox: tuple[float, float, float, float]
     relevance_score: int
+    vector_text: str | None = None
+    picture_type: str | None = None
+    picture_type_confidence: float | None = None
 
     def to_dict(self) -> dict:
         data = asdict(self)
         data["crop_path"] = str(self.crop_path)
+        data["rheology_candidate"] = self.is_rheology_candidate
+        data["exclusion_reason"] = self.exclusion_reason
         return data
+
+    @property
+    def exclusion_reason(self) -> str | None:
+        return _caption_exclusion_reason(self.caption)
+
+    @property
+    def is_rheology_candidate(self) -> bool:
+        return self.relevance_score > 0 and self.exclusion_reason is None and not self.is_confidently_non_chart
+
+    @property
+    def is_confidently_non_chart(self) -> bool:
+        return bool(
+            self.picture_type
+            and self.picture_type not in CHART_PICTURE_TYPES
+            and (self.picture_type_confidence or 0) >= PICTURE_CLASSIFICATION_CONFIDENCE
+        )
 
 
 def localize_figures(
@@ -70,7 +106,7 @@ def localize_figures(
     # Avoid torch.compile on macOS installations that do not have the matching
     # C++ toolchain. Layout inference is fast enough without it for a few pages.
     settings.inference.compile_torch_models = False
-    options = PdfPipelineOptions(do_ocr=False, do_table_structure=False)
+    options = PdfPipelineOptions(do_ocr=False, do_table_structure=False, do_picture_classification=True)
 
     try:
         with TemporaryDirectory(prefix="rheology-docling-") as temp_dir:
@@ -96,9 +132,14 @@ def select_chart_figures(figures: list[LocalizedFigure], max_per_page: int = 2) 
     """Keep only caption-supported chart candidates, preserving page order."""
     selected: list[LocalizedFigure] = []
     for page in sorted({figure.page for figure in figures}):
-        candidates = [figure for figure in figures if figure.page == page and figure.relevance_score > 0]
+        candidates = [figure for figure in figures if figure.page == page and figure.is_rheology_candidate]
         selected.extend(sorted(candidates, key=lambda figure: (-figure.relevance_score, figure.figure_id or ""))[:max_per_page])
     return selected
+
+
+def page_is_explicitly_non_rheology(figures: list[LocalizedFigure]) -> bool:
+    """Return true only when every localized figure has an explicit exclusion."""
+    return bool(figures) and all(figure.caption and figure.exclusion_reason for figure in figures)
 
 
 def _write_selected_pages(pdf_path: Path, candidate_pages: list[int], target_path: Path) -> None:
@@ -140,9 +181,12 @@ def _localized_figures_from_document(
             page = candidate_pages[selected_page - 1]
             caption = _caption_for_picture(picture, texts)
             figure_id = _figure_id(caption)
+            picture_type, picture_type_confidence = _picture_classification(picture)
             suffix = _safe_identifier(figure_id or f"picture_{index:02d}")
             crop_path = figures_dir / f"page_{page:03d}_{suffix}.png"
-            _render_crop(source[page - 1], coords, crop_path, render_scale)
+            source_page = source[page - 1]
+            clip = _crop_rect(source_page, coords)
+            _render_crop(source_page, clip, crop_path, render_scale)
             localized.append(
                 LocalizedFigure(
                     figure_id=figure_id,
@@ -151,6 +195,9 @@ def _localized_figures_from_document(
                     crop_path=crop_path,
                     bbox=coords,
                     relevance_score=_caption_relevance(caption),
+                    vector_text=_extract_vector_text(source_page, clip),
+                    picture_type=picture_type,
+                    picture_type_confidence=picture_type_confidence,
                 )
             )
     finally:
@@ -183,6 +230,21 @@ def _caption_for_picture(picture: dict, texts: list[dict]) -> str | None:
     return " ".join(values) or None
 
 
+def _picture_classification(picture: dict) -> tuple[str | None, float | None]:
+    for annotation in picture.get("annotations") or []:
+        if annotation.get("kind") != "classification":
+            continue
+        predictions = annotation.get("predicted_classes") or []
+        if not predictions:
+            continue
+        prediction = predictions[0]
+        picture_type = prediction.get("class_name")
+        confidence = prediction.get("confidence")
+        if isinstance(picture_type, str) and isinstance(confidence, (int, float)):
+            return picture_type, float(confidence)
+    return None, None
+
+
 def _figure_id(caption: str | None) -> str | None:
     if not caption:
         return None
@@ -199,16 +261,31 @@ def _caption_relevance(caption: str | None) -> int:
     return sum(keyword in lowered for keyword in CHART_CAPTION_KEYWORDS)
 
 
-def _render_crop(page: fitz.Page, bbox: tuple[float, float, float, float], target: Path, scale: float) -> None:
+def _caption_exclusion_reason(caption: str | None) -> str | None:
+    lowered = (caption or "").lower()
+    for keyword, reason in NON_RHEOLOGY_CAPTION_RULES:
+        if keyword in lowered:
+            return reason
+    return None
+
+
+def _crop_rect(page: fitz.Page, bbox: tuple[float, float, float, float]) -> fitz.Rect:
     left, top, right, bottom = bbox
     width, height = right - left, top - bottom
     padding = max(6.0, 0.04 * max(width, height))
-    clip = fitz.Rect(
+    return fitz.Rect(
         max(page.rect.x0, left - padding),
         max(page.rect.y0, page.rect.height - top - padding),
         min(page.rect.x1, right + padding),
         min(page.rect.y1, page.rect.height - bottom + padding),
     )
+
+def _render_crop(page: fitz.Page, clip: fitz.Rect, target: Path, scale: float) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=clip, alpha=False)
     pixmap.save(target)
+
+
+def _extract_vector_text(page: fitz.Page, clip: fitz.Rect, max_chars: int = 3000) -> str | None:
+    text = re.sub(r"\s+", " ", page.get_text("text", clip=clip)).strip()
+    return text[:max_chars] or None

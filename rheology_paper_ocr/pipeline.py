@@ -7,7 +7,13 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from rheology_paper_ocr.extract_with_llm import extract_paper_with_llm
-from rheology_paper_ocr.docling_figures import DoclingFigureError, LocalizedFigure, localize_figures, select_chart_figures
+from rheology_paper_ocr.docling_figures import (
+    DoclingFigureError,
+    LocalizedFigure,
+    localize_figures,
+    page_is_explicitly_non_rheology,
+    select_chart_figures,
+)
 from rheology_paper_ocr.openrouter_client import OpenRouterClient
 from rheology_paper_ocr.pdf_extract import RHEOLOGY_KEYWORDS, discover_pdfs, extract_text_and_pages, file_sha256
 from rheology_paper_ocr.report import write_reports
@@ -74,7 +80,7 @@ def _localize_chart_figures(
         return [], None
     page_numbers = [page for image_path in image_paths if (page := _page_number(image_path)) is not None]
     try:
-        return select_chart_figures(localize_figures(pdf_path, page_numbers, paper_dir)), None
+        return localize_figures(pdf_path, page_numbers, paper_dir), None
     except DoclingFigureError as exc:
         # Figure crops improve accuracy, but a missing optional local model must
         # never block a paid extraction run.
@@ -85,12 +91,16 @@ def _extraction_requests(
     image_paths: list[Path],
     figures: list[LocalizedFigure],
     text_only: bool,
+    localized_figures: list[LocalizedFigure] | None = None,
 ) -> list[tuple[Path | None, LocalizedFigure | None]]:
     if text_only:
         return [(None, None)]
     figures_by_page: dict[int, list[LocalizedFigure]] = defaultdict(list)
     for figure in figures:
         figures_by_page[figure.page].append(figure)
+    localized_by_page: dict[int, list[LocalizedFigure]] = defaultdict(list)
+    for figure in localized_figures or figures:
+        localized_by_page[figure.page].append(figure)
 
     requests: list[tuple[Path | None, LocalizedFigure | None]] = []
     for image_path in image_paths:
@@ -98,6 +108,8 @@ def _extraction_requests(
         page_figures = figures_by_page.get(page or -1, [])
         if page_figures:
             requests.extend((image_path, figure) for figure in page_figures)
+        elif page_is_explicitly_non_rheology(localized_by_page.get(page or -1, [])):
+            continue
         else:
             # Preserve the full-page pass when captions do not identify a chart.
             requests.append((image_path, None))
@@ -111,6 +123,19 @@ def _request_suffix(image_path: Path | None, target_figure: LocalizedFigure | No
         return image_path.stem
     crop_name = target_figure.crop_path.stem
     return f"{image_path.stem}_{crop_name}"
+
+
+def _skipped_page_numbers(
+    image_paths: list[Path],
+    requests: list[tuple[Path | None, LocalizedFigure | None]],
+) -> list[int]:
+    requested = {path for path, _ in requests if path is not None}
+    skipped = []
+    for path in image_paths:
+        page = _page_number(path)
+        if path not in requested and page is not None:
+            skipped.append(page)
+    return skipped
 
 
 def _group_results(results: list[JoinedResult]) -> dict[str, list[JoinedResult]]:
@@ -298,13 +323,19 @@ def _run_papers(
         try:
             text, image_paths = extract_text_and_pages(paper.path, paper_dir)
             extractions = []
-            figures, localization_warning = _localize_chart_figures(
+            localized_figures, localization_warning = _localize_chart_figures(
                 paper.path,
                 image_paths,
                 paper_dir,
                 use_docling_figures=use_docling_figures and not text_only,
             )
-            requests = _extraction_requests(image_paths, figures, text_only=text_only)
+            figures = select_chart_figures(localized_figures)
+            requests = _extraction_requests(
+                image_paths,
+                figures,
+                text_only=text_only,
+                localized_figures=localized_figures,
+            )
             for image_path, target_figure in requests:
                 page_suffix = _request_suffix(image_path, target_figure)
                 attached_images = [] if image_path is None else [image_path]
@@ -339,6 +370,8 @@ def _run_papers(
                     "status": completion_status(text=text, findings_count=len(paper_results)),
                     "images_sent": [] if text_only else [str(path) for path in image_paths],
                     "docling_figures": [figure.to_dict() for figure in figures],
+                    "docling_all_figures": [figure.to_dict() for figure in localized_figures],
+                    "skipped_candidate_pages": _skipped_page_numbers(image_paths, requests),
                     "docling_warning": localization_warning,
                     "text_only": text_only,
                     "findings": len(paper_results),

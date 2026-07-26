@@ -97,6 +97,28 @@ def test_normalizes_points_by_dropping_incomplete_coordinates():
     assert normalized["findings"][0]["points"] == [{"x": 2, "y": 3}]
 
 
+def test_discards_nonpositive_coordinates_on_a_log_axis_and_sorts_points():
+    payload = {
+        "paper_id": "paper_0003",
+        "has_rheology_chart": True,
+        "findings": [
+            {
+                "curve_id": "curve_a",
+                "x_axis_scale": "log",
+                "y_axis_scale": "log",
+                "points": [{"x": 10, "y": 1}, {"x": 0, "y": 2}, {"x": 1, "y": 10}],
+            }
+        ],
+    }
+
+    normalized = normalize_extraction_payload(payload, paper_id="paper_0003", source_pdf="paper.pdf")
+
+    finding = normalized["findings"][0]
+    assert finding["points"] == [{"x": 1.0, "y": 10.0}, {"x": 10.0, "y": 1.0}]
+    assert "discarded 1 invalid or scale-incompatible chart point(s)" in finding["warnings"]
+    assert "sorted chart points into ascending x order" in finding["warnings"]
+
+
 def test_normalizes_flat_chart_payload_with_data_points_and_sample_description():
     payload = {
         "paper_id": "paper_0003",
@@ -151,6 +173,8 @@ def test_target_figure_prompt_limits_a_crop_pass_to_the_localized_figure():
 
     assert "The target figure is Figure 2" in prompt
     assert "Extract only this figure" in prompt
+
+
 
 
 def test_downgrades_unsupported_fibre_outcomes_to_unclear():

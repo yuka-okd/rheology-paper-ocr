@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -384,6 +385,12 @@ def _apply_finding_defaults(
         item["chart_crop_path"] = default_chart_crop_path
 
     warnings = list(item.get("warnings") or [])
+    item["points"], point_warnings = _validate_points(
+        item.get("points") or [],
+        x_axis_scale=item.get("x_axis_scale"),
+        y_axis_scale=item.get("y_axis_scale"),
+    )
+    warnings.extend(point_warnings)
     fibre = item.get("fibre_outcome") or _normalize_fibre_payload(None)
     if fibre.get("outcome") not in {"unclear", "not tested"} and not fibre.get("evidence_text"):
         fibre = dict(fibre)
@@ -405,6 +412,38 @@ def _normalize_points(points: list[Any]) -> list[dict[str, float]]:
             if point[0] is not None and point[1] is not None:
                 normalized.append({"x": point[0], "y": point[1]})
     return normalized
+
+
+def _validate_points(
+    points: list[dict[str, Any]],
+    x_axis_scale: str | None,
+    y_axis_scale: str | None,
+) -> tuple[list[dict[str, float]], list[str]]:
+    """Keep only finite, scale-compatible coordinates and canonicalize x order."""
+    validated: list[dict[str, float]] = []
+    discarded = 0
+    x_is_log = (x_axis_scale or "").lower() == "log"
+    y_is_log = (y_axis_scale or "").lower() == "log"
+    for point in points:
+        try:
+            x, y = float(point["x"]), float(point["y"])
+        except (KeyError, TypeError, ValueError):
+            discarded += 1
+            continue
+        if not math.isfinite(x) or not math.isfinite(y) or (x_is_log and x <= 0) or (y_is_log and y <= 0):
+            discarded += 1
+            continue
+        validated.append({"x": x, "y": y})
+
+    warnings = []
+    if discarded:
+        warnings.append(f"discarded {discarded} invalid or scale-incompatible chart point(s)")
+    if len(validated) > 1 and validated != sorted(validated, key=lambda point: point["x"]):
+        validated.sort(key=lambda point: point["x"])
+        warnings.append("sorted chart points into ascending x order")
+    if len({point["x"] for point in validated}) != len(validated):
+        warnings.append("chart points contain duplicate x coordinates")
+    return validated, warnings
 
 
 def _axis_label(axis: Any) -> str | None:

@@ -13,15 +13,22 @@ def _canonical(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]", "", (value or "").lower())
 
 
-def _finding_key(finding: dict[str, Any]) -> str:
+def _finding_keys(finding: dict[str, Any]) -> set[str]:
     sample = finding.get("sample") or {}
-    return _canonical(finding.get("curve_id") or sample.get("sample_id") or finding.get("curve_legend_text"))
+    fields = (
+        finding.get("curve_id"),
+        finding.get("curve_legend_text"),
+        finding.get("curve_visual_label"),
+        sample.get("sample_id"),
+        sample.get("sample_display_name"),
+    )
+    return {_canonical(value) for value in fields if _canonical(value)}
 
 
 def _find_matching_finding(reference: dict[str, Any], findings: list[dict[str, Any]]) -> dict[str, Any] | None:
     aliases = {_canonical(alias) for alias in reference["aliases"]}
     for finding in findings:
-        if _finding_key(finding) in aliases:
+        if _finding_keys(finding) & aliases:
             return finding
     return None
 

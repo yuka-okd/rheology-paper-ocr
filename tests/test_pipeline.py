@@ -117,3 +117,19 @@ def test_uses_a_figure_crop_when_docling_identifies_a_chart(tmp_path: Path):
     requests = _extraction_requests([first_page, second_page], [figure], text_only=False)
 
     assert requests == [(first_page, None), (second_page, figure)]
+
+
+def test_skips_a_page_when_every_docling_figure_is_explicitly_non_rheology(tmp_path: Path):
+    page = tmp_path / "page_003.png"
+    morphology = LocalizedFigure(
+        "Figure 3",
+        3,
+        "Figure 3. Dependence of nanofiber morphology on concentration.",
+        tmp_path / "figure_3.png",
+        (0, 1, 1, 0),
+        0,
+    )
+
+    requests = _extraction_requests([page], [], text_only=False, localized_figures=[morphology])
+
+    assert requests == []
