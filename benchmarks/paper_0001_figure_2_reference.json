@@ -1,0 +1,19 @@
+{
+  "paper_id": "paper_0001",
+  "figure_id": "Figure 2",
+  "reference_type": "manual approximate digitization from the rendered source figure",
+  "axes": {
+    "x_label_contains": "PAA",
+    "y_label_contains": "Specific viscosity",
+    "x_scale": "log",
+    "y_scale": "log"
+  },
+  "series": [
+    {"id": "PAA-5MDa", "aliases": ["PAA-5MDa", "fig2_paa_5mda", "5MDa"], "points": [{"x": 0.01, "y": 0.09}, {"x": 1.0, "y": 60.0}, {"x": 2.7, "y": 4000.0}]},
+    {"id": "PAA-US", "aliases": ["PAA-US", "PAAUS", "fig2_paa_us", "US"], "points": [{"x": 0.1, "y": 0.4}, {"x": 1.4, "y": 27.0}, {"x": 3.5, "y": 1300.0}]},
+    {"id": "PAA-400kDa", "aliases": ["PAA-400kDa", "PAA 400 kDa", "fig2_paa_400kda", "400kDa"], "points": [{"x": 0.03, "y": 0.06}, {"x": 1.2, "y": 4.5}, {"x": 9.0, "y": 4000.0}]},
+    {"id": "PAA-80kDa", "aliases": ["PAA-80kDa", "PAA 80 kDa", "fig2_paa_80kda", "80kDa"], "points": [{"x": 0.7, "y": 0.6}, {"x": 5.0, "y": 10.0}, {"x": 9.5, "y": 60.0}]},
+    {"id": "PAA-22kDa", "aliases": ["PAA-22kDa", "PAA 22 kDa", "fig2_paa_22kda", "22kDa"], "points": [{"x": 0.7, "y": 0.18}, {"x": 2.0, "y": 0.7}, {"x": 9.0, "y": 7.0}]},
+    {"id": "PAA-12kDa", "aliases": ["PAA-12kDa", "PAA 12 kDa", "fig2_paa_12kda", "12kDa"], "points": [{"x": 0.9, "y": 0.11}, {"x": 3.0, "y": 0.5}, {"x": 12.0, "y": 4.0}]}
+  ]
+}

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rheology-paper-ocr"
+version = "0.1.0"
+description = "Extract rheology chart and fibre outcome evidence from chemistry papers."
+requires-python = ">=3.10"
+dependencies = [
+  "httpx",
+  "pydantic>=2",
+  "python-dotenv",
+  "typer",
+  "rich",
+  "PyMuPDF",
+]
+
+[project.scripts]
+rheology-paper-ocr = "rheology_paper_ocr.cli:main"
+
+[tool.setuptools]
+packages = ["rheology_paper_ocr"]

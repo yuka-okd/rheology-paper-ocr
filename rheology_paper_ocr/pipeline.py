@@ -1,0 +1,273 @@
+from __future__ import annotations
+
+import json
+from collections import defaultdict
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+from rheology_paper_ocr.extract_with_llm import extract_paper_with_llm
+from rheology_paper_ocr.openrouter_client import OpenRouterClient
+from rheology_paper_ocr.pdf_extract import RHEOLOGY_KEYWORDS, discover_pdfs, extract_text_and_pages, file_sha256
+from rheology_paper_ocr.report import write_reports
+from rheology_paper_ocr.rheology_analysis import is_shear_rate_axis, series_quality_warnings, summarize_series
+from rheology_paper_ocr.schemas import DigitizedSeries, JoinedResult, SourcePaper
+
+
+COMPLETED_STATUSES = {"completed", "completed_no_findings"}
+
+
+def _paper_index_from_id(paper_id: str) -> int:
+    return int(paper_id.split("_")[-1])
+
+
+def completion_status(text: str, findings_count: int) -> str:
+    if findings_count:
+        return "completed"
+    lowered = text.lower()
+    if any(keyword in lowered for keyword in RHEOLOGY_KEYWORDS):
+        return "completed_no_findings"
+    return "completed"
+
+
+def load_saved_results(out_dir: Path) -> list[JoinedResult]:
+    results_path = out_dir / "results.json"
+    if not results_path.exists():
+        return []
+    data = json.loads(results_path.read_text(encoding="utf-8"))
+    return [JoinedResult.model_validate(item) for item in data]
+
+
+def load_manifest(out_dir: Path) -> list[dict]:
+    manifest_path = out_dir / "manifest.json"
+    if not manifest_path.exists():
+        return []
+    return json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+def _write_manifest(out_dir: Path, manifest: list[dict]) -> None:
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+
+def _page_number(image_path: Path) -> int | None:
+    try:
+        return int(image_path.stem.rsplit("_", maxsplit=1)[-1])
+    except ValueError:
+        return None
+
+
+def _relative_to_run(path: Path, out_dir: Path) -> str:
+    try:
+        return str(path.relative_to(out_dir))
+    except ValueError:
+        return str(path)
+
+
+def _group_results(results: list[JoinedResult]) -> dict[str, list[JoinedResult]]:
+    grouped: dict[str, list[JoinedResult]] = defaultdict(list)
+    for result in results:
+        grouped[result.paper_id].append(result)
+    return dict(grouped)
+
+
+def _flatten_results(results_by_paper: dict[str, list[JoinedResult]], papers: list[SourcePaper]) -> list[JoinedResult]:
+    return [result for paper in papers for result in results_by_paper.get(paper.paper_id, [])]
+
+
+def _finding_results(extractions, paper: SourcePaper) -> list[JoinedResult]:
+    results: list[JoinedResult] = []
+    for extraction in extractions:
+        for finding in extraction.findings:
+            series = DigitizedSeries(
+                curve_id=finding.curve_id,
+                visual_label=finding.curve_visual_label,
+                legend_text=finding.curve_legend_text,
+                points=finding.points,
+                confidence=finding.confidence,
+                warnings=finding.warnings,
+            )
+            summary = summarize_series(series, x_axis_label=finding.x_axis_label)
+            warnings = list(finding.warnings) + series_quality_warnings(series, x_axis_label=finding.x_axis_label)
+            if not finding.sample.evidence_text:
+                warnings.append("sample link lacks direct evidence")
+            if not finding.curve_visual_label and not finding.curve_legend_text:
+                warnings.append("curve lacks a visual or legend identifier")
+
+            confidence = finding.confidence
+            if confidence == "high" and warnings:
+                confidence = "medium"
+            if (
+                summary.rheology_class == "unclear"
+                and confidence == "medium"
+                and (finding.x_axis_label is None or is_shear_rate_axis(finding.x_axis_label))
+            ):
+                confidence = "low"
+
+            results.append(
+                JoinedResult(
+                    paper_id=paper.paper_id,
+                    source_pdf=str(paper.path),
+                    figure_id=finding.figure_id,
+                    page=finding.page,
+                    chart_crop_path=finding.chart_crop_path,
+                    curve_id=finding.curve_id,
+                    curve_visual_label=finding.curve_visual_label,
+                    curve_legend_text=finding.curve_legend_text,
+                    sample_id=finding.sample.sample_id,
+                    sample_display_name=finding.sample.sample_display_name,
+                    sample_composition=finding.sample.sample_composition,
+                    x_axis_label=finding.x_axis_label,
+                    x_axis_unit=finding.x_axis_unit,
+                    x_axis_scale=finding.x_axis_scale,
+                    y_axis_label=finding.y_axis_label,
+                    y_axis_unit=finding.y_axis_unit,
+                    y_axis_scale=finding.y_axis_scale,
+                    start_x=summary.start_x,
+                    start_y=summary.start_y,
+                    end_x=summary.end_x,
+                    end_y=summary.end_y,
+                    fold_change=summary.fold_change,
+                    loglog_slope=summary.loglog_slope,
+                    rheology_class=summary.rheology_class,
+                    fibre_outcome=finding.fibre_outcome.outcome,
+                    fibre_evidence_text=finding.fibre_outcome.evidence_text,
+                    fibre_evidence_source=finding.fibre_outcome.evidence_source,
+                    confidence=confidence,
+                    warnings=warnings,
+                )
+            )
+    return results
+
+
+def _is_resumable_complete(status: dict | None, sha256: str, paper_dir: Path) -> bool:
+    return bool(
+        status
+        and status.get("status") in COMPLETED_STATUSES
+        and status.get("sha256") == sha256
+        and (paper_dir / "results.json").exists()
+    )
+
+
+def _write_paper_results(paper_dir: Path, results: list[JoinedResult]) -> None:
+    (paper_dir / "results.json").write_text(
+        json.dumps([result.model_dump(mode="json") for result in results], indent=2),
+        encoding="utf-8",
+    )
+
+
+def run_pipeline(
+    pdf_dir: Path,
+    out_dir: Path,
+    max_papers: int | None = None,
+    model: str | None = None,
+    text_only: bool = False,
+    resume: bool = False,
+) -> list[JoinedResult]:
+    papers = discover_pdfs(pdf_dir)
+    if max_papers is not None:
+        papers = papers[:max_papers]
+    return _run_papers(papers, out_dir=out_dir, model=model, text_only=text_only, resume=resume)
+
+
+def resume_pipeline(out_dir: Path, model: str | None = None, text_only: bool = False) -> list[JoinedResult]:
+    manifest = load_manifest(out_dir)
+    papers = [
+        SourcePaper(paper_id=item["paper_id"], path=Path(item["source_pdf"]))
+        for item in manifest
+        if item.get("source_pdf") and Path(item["source_pdf"]).exists()
+    ]
+    if not papers:
+        raise ValueError(f"No available source PDFs in {out_dir / 'manifest.json'}")
+    return _run_papers(papers, out_dir=out_dir, model=model, text_only=text_only, resume=True)
+
+
+def _run_papers(
+    papers: list[SourcePaper],
+    out_dir: Path,
+    model: str | None,
+    text_only: bool,
+    resume: bool,
+) -> list[JoinedResult]:
+    load_dotenv()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    papers_dir = out_dir / "papers"
+    papers_dir.mkdir(exist_ok=True)
+
+    previous_statuses = {item.get("paper_id"): item for item in load_manifest(out_dir)} if resume else {}
+    results_by_paper = _group_results(load_saved_results(out_dir)) if resume else {}
+    if not papers:
+        _write_manifest(out_dir, [])
+        write_reports(out_dir, [])
+        return []
+    client = OpenRouterClient(model=model)
+    manifest: list[dict] = []
+
+    for paper in papers:
+        paper_dir = papers_dir / paper.paper_id
+        llm_dir = paper_dir / "llm"
+        sha256 = file_sha256(paper.path)
+        previous_status = previous_statuses.get(paper.paper_id)
+        if resume and _is_resumable_complete(previous_status, sha256, paper_dir):
+            manifest.append(previous_status)
+            if paper.paper_id not in results_by_paper:
+                results_by_paper[paper.paper_id] = [
+                    JoinedResult.model_validate(item)
+                    for item in json.loads((paper_dir / "results.json").read_text(encoding="utf-8"))
+                ]
+            continue
+
+        llm_dir.mkdir(parents=True, exist_ok=True)
+        status = {
+            "paper_id": paper.paper_id,
+            "source_pdf": str(paper.path),
+            "sha256": sha256,
+            "status": "started",
+            "paper_number": _paper_index_from_id(paper.paper_id),
+        }
+        try:
+            text, image_paths = extract_text_and_pages(paper.path, paper_dir)
+            extractions = []
+            request_images = [None] if text_only else image_paths
+            for image_path in request_images:
+                page_suffix = "text_only" if image_path is None else image_path.stem
+                chart_crop_path = None if image_path is None else _relative_to_run(image_path, out_dir)
+                extraction = extract_paper_with_llm(
+                    client,
+                    paper.paper_id,
+                    str(paper.path),
+                    text,
+                    [] if image_path is None else [image_path],
+                    raw_response_path=llm_dir / f"{page_suffix}_raw_response.json",
+                    text_only=text_only,
+                    page_number=None if image_path is None else _page_number(image_path),
+                    chart_crop_path=chart_crop_path,
+                )
+                (llm_dir / f"{page_suffix}_extraction.json").write_text(
+                    extraction.model_dump_json(indent=2),
+                    encoding="utf-8",
+                )
+                extractions.append(extraction)
+
+            paper_results = _finding_results(extractions, paper)
+            results_by_paper[paper.paper_id] = paper_results
+            _write_paper_results(paper_dir, paper_results)
+            status.update(
+                {
+                    "status": completion_status(text=text, findings_count=len(paper_results)),
+                    "images_sent": [] if text_only else [str(path) for path in image_paths],
+                    "text_only": text_only,
+                    "findings": len(paper_results),
+                    "result_path": _relative_to_run(paper_dir / "results.json", out_dir),
+                }
+            )
+        except Exception as exc:
+            results_by_paper.pop(paper.paper_id, None)
+            status.update({"status": "failed", "error": str(exc)})
+        manifest.append(status)
+        _write_manifest(out_dir, manifest)
+        write_reports(out_dir, _flatten_results(results_by_paper, papers))
+
+    all_results = _flatten_results(results_by_paper, papers)
+    _write_manifest(out_dir, manifest)
+    write_reports(out_dir, all_results)
+    return all_results

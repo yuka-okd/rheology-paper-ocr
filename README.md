@@ -1,1 +1,55 @@
 # rheology-paper-ocr
+
+An evidence-first CLI for connecting rheology chart series in chemistry papers to the represented formulation and its reported fibre outcome.
+
+This is a screening and review workflow. It extracts sparse points to classify broad rheology behaviour; it does not claim publication-grade curve reconstruction.
+
+## What a result means
+
+Each row represents one chart series and preserves:
+
+- source paper, page, and chart image;
+- axis metadata, sparse points, approximate endpoints, and deterministic rheology class;
+- the linked sample/formulation and its supporting text;
+- a text-evidence-backed fibre outcome; and
+- confidence and warnings for review.
+
+Rows without enough curve evidence, an explicit sample link, or fibre evidence remain `unclear` or carry a warning. The tool must not infer fibre formation from microscopy images.
+
+## Run
+
+```bash
+python3 -m pip install -e .
+export OPENROUTER_API_KEY="..."
+python3 -m rheology_paper_ocr.cli run /path/to/papers --out outputs/run-001 --max-papers 5
+```
+
+Use `--text-only` to skip chart images, or `--resume` to reuse a completed paper only when its source hash is unchanged.
+Set `OPENROUTER_MAX_TOKENS` to change the per-page extraction response budget; it defaults to `3000` to keep first-pass runs bounded.
+
+```bash
+python3 -m rheology_paper_ocr.cli inspect /path/to/paper.pdf --out outputs/inspect-paper
+python3 -m rheology_paper_ocr.cli report outputs/run-001
+python3 -m rheology_paper_ocr.cli resume outputs/run-001
+```
+
+## Output
+
+```text
+outputs/run-001/
+  manifest.json
+  results.csv
+  results.json
+  report.html
+  papers/<paper_id>/
+    text.md
+    pages/
+    llm/
+    results.json
+```
+
+Open `report.html` to review each extracted row alongside the page image and its warnings.
+
+## Validation boundary
+
+The pipeline is ready for a small, manually reviewed evaluation set. Before using the output for scientific conclusions, measure chart-detection recall, correct curve count, sample-link correctness, fibre-outcome correctness, and the rate of `unclear` rows against hand-labelled papers.
