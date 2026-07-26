@@ -24,6 +24,15 @@ export OPENROUTER_API_KEY="..."
 python3 -m rheology_paper_ocr.cli run /path/to/papers --out outputs/run-001 --max-papers 5
 ```
 
+For the recommended hybrid mode, install the optional local figure locator. It
+uses Docling to find figures, render an exact high-resolution crop, and recover
+the caption before sending the crop plus page context to the vision model.
+Without it, the pipeline falls back to full candidate pages.
+
+```bash
+python3 -m pip install -e '.[docling]'
+```
+
 Use `--text-only` to skip chart images, or `--resume` to reuse a completed paper only when its source hash is unchanged.
 Set `OPENROUTER_MAX_TOKENS` to change the per-page extraction response budget; it defaults to `3000` to keep first-pass runs bounded.
 
@@ -44,6 +53,8 @@ outputs/run-001/
   papers/<paper_id>/
     text.md
     pages/
+    figures/             # Docling-localized chart crops when available
+    docling_figures.json # figure bounding boxes and recovered captions
     llm/
     results.json
 ```

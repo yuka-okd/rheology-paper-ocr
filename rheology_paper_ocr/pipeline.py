@@ -7,6 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from rheology_paper_ocr.extract_with_llm import extract_paper_with_llm
+from rheology_paper_ocr.docling_figures import DoclingFigureError, LocalizedFigure, localize_figures, select_chart_figures
 from rheology_paper_ocr.openrouter_client import OpenRouterClient
 from rheology_paper_ocr.pdf_extract import RHEOLOGY_KEYWORDS, discover_pdfs, extract_text_and_pages, file_sha256
 from rheology_paper_ocr.report import write_reports
@@ -61,6 +62,55 @@ def _relative_to_run(path: Path, out_dir: Path) -> str:
         return str(path.relative_to(out_dir))
     except ValueError:
         return str(path)
+
+
+def _localize_chart_figures(
+    pdf_path: Path,
+    image_paths: list[Path],
+    paper_dir: Path,
+    use_docling_figures: bool,
+) -> tuple[list[LocalizedFigure], str | None]:
+    if not use_docling_figures:
+        return [], None
+    page_numbers = [page for image_path in image_paths if (page := _page_number(image_path)) is not None]
+    try:
+        return select_chart_figures(localize_figures(pdf_path, page_numbers, paper_dir)), None
+    except DoclingFigureError as exc:
+        # Figure crops improve accuracy, but a missing optional local model must
+        # never block a paid extraction run.
+        return [], str(exc)
+
+
+def _extraction_requests(
+    image_paths: list[Path],
+    figures: list[LocalizedFigure],
+    text_only: bool,
+) -> list[tuple[Path | None, LocalizedFigure | None]]:
+    if text_only:
+        return [(None, None)]
+    figures_by_page: dict[int, list[LocalizedFigure]] = defaultdict(list)
+    for figure in figures:
+        figures_by_page[figure.page].append(figure)
+
+    requests: list[tuple[Path | None, LocalizedFigure | None]] = []
+    for image_path in image_paths:
+        page = _page_number(image_path)
+        page_figures = figures_by_page.get(page or -1, [])
+        if page_figures:
+            requests.extend((image_path, figure) for figure in page_figures)
+        else:
+            # Preserve the full-page pass when captions do not identify a chart.
+            requests.append((image_path, None))
+    return requests
+
+
+def _request_suffix(image_path: Path | None, target_figure: LocalizedFigure | None) -> str:
+    if image_path is None:
+        return "text_only"
+    if target_figure is None:
+        return image_path.stem
+    crop_name = target_figure.crop_path.stem
+    return f"{image_path.stem}_{crop_name}"
 
 
 def _group_results(results: list[JoinedResult]) -> dict[str, list[JoinedResult]]:
@@ -162,14 +212,27 @@ def run_pipeline(
     model: str | None = None,
     text_only: bool = False,
     resume: bool = False,
+    use_docling_figures: bool = True,
 ) -> list[JoinedResult]:
     papers = discover_pdfs(pdf_dir)
     if max_papers is not None:
         papers = papers[:max_papers]
-    return _run_papers(papers, out_dir=out_dir, model=model, text_only=text_only, resume=resume)
+    return _run_papers(
+        papers,
+        out_dir=out_dir,
+        model=model,
+        text_only=text_only,
+        resume=resume,
+        use_docling_figures=use_docling_figures,
+    )
 
 
-def resume_pipeline(out_dir: Path, model: str | None = None, text_only: bool = False) -> list[JoinedResult]:
+def resume_pipeline(
+    out_dir: Path,
+    model: str | None = None,
+    text_only: bool = False,
+    use_docling_figures: bool = True,
+) -> list[JoinedResult]:
     manifest = load_manifest(out_dir)
     papers = [
         SourcePaper(paper_id=item["paper_id"], path=Path(item["source_pdf"]))
@@ -178,7 +241,14 @@ def resume_pipeline(out_dir: Path, model: str | None = None, text_only: bool = F
     ]
     if not papers:
         raise ValueError(f"No available source PDFs in {out_dir / 'manifest.json'}")
-    return _run_papers(papers, out_dir=out_dir, model=model, text_only=text_only, resume=True)
+    return _run_papers(
+        papers,
+        out_dir=out_dir,
+        model=model,
+        text_only=text_only,
+        resume=True,
+        use_docling_figures=use_docling_figures,
+    )
 
 
 def _run_papers(
@@ -187,6 +257,7 @@ def _run_papers(
     model: str | None,
     text_only: bool,
     resume: bool,
+    use_docling_figures: bool,
 ) -> list[JoinedResult]:
     load_dotenv()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -227,20 +298,32 @@ def _run_papers(
         try:
             text, image_paths = extract_text_and_pages(paper.path, paper_dir)
             extractions = []
-            request_images = [None] if text_only else image_paths
-            for image_path in request_images:
-                page_suffix = "text_only" if image_path is None else image_path.stem
+            figures, localization_warning = _localize_chart_figures(
+                paper.path,
+                image_paths,
+                paper_dir,
+                use_docling_figures=use_docling_figures and not text_only,
+            )
+            requests = _extraction_requests(image_paths, figures, text_only=text_only)
+            for image_path, target_figure in requests:
+                page_suffix = _request_suffix(image_path, target_figure)
+                attached_images = [] if image_path is None else [image_path]
                 chart_crop_path = None if image_path is None else _relative_to_run(image_path, out_dir)
+                if target_figure is not None:
+                    attached_images.append(target_figure.crop_path)
+                    chart_crop_path = _relative_to_run(target_figure.crop_path, out_dir)
                 extraction = extract_paper_with_llm(
                     client,
                     paper.paper_id,
                     str(paper.path),
                     text,
-                    [] if image_path is None else [image_path],
+                    attached_images,
                     raw_response_path=llm_dir / f"{page_suffix}_raw_response.json",
                     text_only=text_only,
                     page_number=None if image_path is None else _page_number(image_path),
                     chart_crop_path=chart_crop_path,
+                    target_figure_id=None if target_figure is None else target_figure.figure_id,
+                    target_figure_caption=None if target_figure is None else target_figure.caption,
                 )
                 (llm_dir / f"{page_suffix}_extraction.json").write_text(
                     extraction.model_dump_json(indent=2),
@@ -255,6 +338,8 @@ def _run_papers(
                 {
                     "status": completion_status(text=text, findings_count=len(paper_results)),
                     "images_sent": [] if text_only else [str(path) for path in image_paths],
+                    "docling_figures": [figure.to_dict() for figure in figures],
+                    "docling_warning": localization_warning,
                     "text_only": text_only,
                     "findings": len(paper_results),
                     "result_path": _relative_to_run(paper_dir / "results.json", out_dir),

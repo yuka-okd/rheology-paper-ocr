@@ -19,6 +19,11 @@ def run(
     max_papers: int | None = typer.Option(None, "--max-papers", help="Maximum number of PDFs to process."),
     text_only: bool = typer.Option(False, "--text-only", help="Skip vision calls and extract from text/captions only."),
     resume: bool = typer.Option(False, "--resume", help="Reuse completed papers with unchanged source hashes."),
+    docling_figures: bool = typer.Option(
+        True,
+        "--docling-figures/--no-docling-figures",
+        help="Use local Docling figure crops when the optional dependency is installed.",
+    ),
 ):
     """Run the extraction pipeline over a directory of PDFs."""
     results = run_pipeline(
@@ -28,6 +33,7 @@ def run(
         model=model,
         text_only=text_only,
         resume=resume,
+        use_docling_figures=docling_figures,
     )
     typer.echo(f"Wrote {len(results)} extracted rows to {out}")
 
@@ -52,9 +58,19 @@ def resume(
     run_dir: Path,
     model: str | None = typer.Option(None, "--model", help="OpenRouter model ID."),
     text_only: bool = typer.Option(False, "--text-only", help="Skip vision calls and extract from text/captions only."),
+    docling_figures: bool = typer.Option(
+        True,
+        "--docling-figures/--no-docling-figures",
+        help="Use local Docling figure crops when the optional dependency is installed.",
+    ),
 ):
     """Resume incomplete papers recorded in a run manifest."""
-    results = resume_pipeline(run_dir, model=model, text_only=text_only)
+    results = resume_pipeline(
+        run_dir,
+        model=model,
+        text_only=text_only,
+        use_docling_figures=docling_figures,
+    )
     typer.echo(f"Resumed run with {len(results)} extracted rows in {run_dir}")
 
 

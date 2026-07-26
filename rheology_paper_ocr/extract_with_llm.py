@@ -65,6 +65,8 @@ def build_extraction_prompt(
     text: str,
     text_only: bool = False,
     attached_page: int | None = None,
+    target_figure_id: str | None = None,
+    target_figure_caption: str | None = None,
 ) -> str:
     clipped_text = select_prompt_context(text)
     mode_instruction = (
@@ -72,6 +74,12 @@ def build_extraction_prompt(
         "Do not invent chart points; leave points empty when chart data cannot be read from text."
         if text_only
         else "Use the attached page image to inspect one candidate chart page. If several images are attached, they show the same page: use the full page for context and any magnified detail crop for marker-to-legend mapping and point digitization."
+    )
+    target_instruction = (
+        f"The target figure is {target_figure_id or 'the supplied crop'}. Its caption is: {target_figure_caption or 'not available'}. "
+        "The final attached image is an exact crop of this target figure. Extract only this figure, not other charts visible in the full-page context image."
+        if target_figure_id or target_figure_caption
+        else ""
     )
     return f"""
 You are extracting rheology and text-only fibre outcome evidence from a chemistry paper.
@@ -82,6 +90,7 @@ Attached page: {attached_page if attached_page is not None else "none (text-only
 
 {mode_instruction} Use the text below for captions, legends,
 sample definitions, formulation aliases, and fibre outcome evidence.
+{target_instruction}
 
 Return ONLY valid JSON matching the provided schema.
 
@@ -114,8 +123,18 @@ def extract_paper_with_llm(
     text_only: bool = False,
     page_number: int | None = None,
     chart_crop_path: str | None = None,
+    target_figure_id: str | None = None,
+    target_figure_caption: str | None = None,
 ) -> PaperLLMExtraction:
-    prompt = build_extraction_prompt(paper_id, source_pdf, text, text_only=text_only, attached_page=page_number)
+    prompt = build_extraction_prompt(
+        paper_id,
+        source_pdf,
+        text,
+        text_only=text_only,
+        attached_page=page_number,
+        target_figure_id=target_figure_id,
+        target_figure_caption=target_figure_caption,
+    )
     raw = client.extract(prompt, image_paths, raw_response_path=raw_response_path)
     normalized = normalize_extraction_payload(
         raw,
@@ -400,7 +419,7 @@ def _axis_label(axis: Any) -> str | None:
 
 def _is_explicitly_non_rheology_finding(finding: dict[str, Any]) -> bool:
     y_axis = (finding.get("y_axis_label") or "").lower()
-    return "fiber diameter" in y_axis or "fibre diameter" in y_axis
+    return "diameter" in y_axis or "diam" in y_axis
 
 
 def _normalize_fibre_outcome(outcome: str | None, evidence_text: str | None = None) -> str:

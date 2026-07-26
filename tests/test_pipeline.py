@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 
 import rheology_paper_ocr.pipeline as pipeline
-from rheology_paper_ocr.pipeline import completion_status, load_saved_results, run_pipeline
+from rheology_paper_ocr.docling_figures import LocalizedFigure
+from rheology_paper_ocr.pipeline import _extraction_requests, completion_status, load_saved_results, run_pipeline
 from rheology_paper_ocr.schemas import DataPoint, ExtractedFinding, FibreOutcome, JoinedResult, PaperLLMExtraction, SampleLink
 
 
@@ -98,3 +99,21 @@ def test_empty_pipeline_writes_empty_reports_without_openrouter(monkeypatch, tmp
     assert run_pipeline(tmp_path, tmp_path / "output") == []
     assert (tmp_path / "output" / "results.json").exists()
     assert (tmp_path / "output" / "report.html").exists()
+
+
+def test_uses_a_figure_crop_when_docling_identifies_a_chart(tmp_path: Path):
+    first_page = tmp_path / "page_001.png"
+    second_page = tmp_path / "page_002.png"
+    crop = tmp_path / "figure_2.png"
+    figure = LocalizedFigure(
+        figure_id="Figure 2",
+        page=2,
+        caption="Figure 2. Viscosity against shear rate.",
+        crop_path=crop,
+        bbox=(0, 1, 1, 0),
+        relevance_score=2,
+    )
+
+    requests = _extraction_requests([first_page, second_page], [figure], text_only=False)
+
+    assert requests == [(first_page, None), (second_page, figure)]

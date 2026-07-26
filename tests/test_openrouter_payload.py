@@ -139,6 +139,20 @@ def test_assigns_the_attached_page_and_crop_to_unannotated_findings():
     assert normalized["findings"][0]["chart_crop_path"] == "papers/paper_0003/pages/page_007.png"
 
 
+def test_target_figure_prompt_limits_a_crop_pass_to_the_localized_figure():
+    prompt = build_extraction_prompt(
+        "paper_0003",
+        "paper.pdf",
+        "Figure 2 is a viscosity plot.",
+        attached_page=7,
+        target_figure_id="Figure 2",
+        target_figure_caption="Figure 2. Viscosity against shear rate.",
+    )
+
+    assert "The target figure is Figure 2" in prompt
+    assert "Extract only this figure" in prompt
+
+
 def test_downgrades_unsupported_fibre_outcomes_to_unclear():
     payload = {
         "paper_id": "paper_0003",
@@ -171,6 +185,25 @@ def test_drops_explicit_fibre_diameter_plot_from_rheology_findings():
 
     assert normalized["findings"] == []
     assert "dropped 1 explicitly non-rheology finding(s)" in normalized["paper_warnings"]
+
+
+def test_drops_abbreviated_diameter_axis_from_rheology_findings():
+    payload = {
+        "paper_id": "paper_0003",
+        "has_rheology_chart": True,
+        "findings": [
+            {
+                "curve_id": "curve_a",
+                "x_axis_label": "zero shear viscosity",
+                "y_axis_label": "Avg. Diam.",
+                "points": [{"x": 1, "y": 2}],
+            }
+        ],
+    }
+
+    normalized = normalize_extraction_payload(payload, paper_id="paper_0003", source_pdf="paper.pdf")
+
+    assert normalized["findings"] == []
 
 
 def test_client_requests_schema_response_format(monkeypatch, tmp_path: Path):

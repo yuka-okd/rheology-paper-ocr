@@ -16,6 +16,9 @@ dependencies = [
   "PyMuPDF",
 ]
 
+[project.optional-dependencies]
+docling = ["docling>=2.115,<3"]
+
 [project.scripts]
 rheology-paper-ocr = "rheology_paper_ocr.cli:main"
 
