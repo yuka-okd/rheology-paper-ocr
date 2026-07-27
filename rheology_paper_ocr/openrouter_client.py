@@ -94,24 +94,44 @@ class OpenRouterClient:
             if raw_response_path:
                 _write_json(raw_response_path.with_name(f"{raw_response_path.stem}_malformed_schema.json"), data)
             # Some reasoning-capable models consume the first response budget
-            # before they emit complete JSON. Give the repair pass enough room
-            # to finish while retaining the cheaper first attempt by default.
-            fallback_payload = build_chat_payload(
+            # before they emit complete JSON. Preserve schema mode for the
+            # larger retry: it constrains the answer far better than loose JSON.
+            schema_retry_payload = build_chat_payload(
                 self.model,
                 prompt,
                 image_paths,
-                use_schema=False,
+                use_schema=True,
                 max_tokens=self.fallback_max_tokens,
             )
-            fallback_response = self._post_chat_with_retries(fallback_payload)
-            fallback_data = fallback_response.json()
+            schema_retry_response = self._post_chat_with_retries(schema_retry_payload)
+            schema_retry_data = schema_retry_response.json()
             if raw_response_path:
-                _write_json(raw_response_path, fallback_data)
-            if "choices" not in fallback_data:
-                message = fallback_data.get("error", {}).get("message") or json.dumps(fallback_data)[:1000]
-                raise RuntimeError(f"OpenRouter fallback response did not include choices: {message}")
-            fallback_response.raise_for_status()
-            return parse_json_response(fallback_data["choices"][0]["message"]["content"])
+                _write_json(raw_response_path, schema_retry_data)
+            if "choices" not in schema_retry_data:
+                message = schema_retry_data.get("error", {}).get("message") or json.dumps(schema_retry_data)[:1000]
+                raise RuntimeError(f"OpenRouter schema retry did not include choices: {message}")
+            schema_retry_response.raise_for_status()
+            try:
+                return parse_json_response(schema_retry_data["choices"][0]["message"]["content"])
+            except json.JSONDecodeError:
+                if raw_response_path:
+                    _write_json(raw_response_path.with_name(f"{raw_response_path.stem}_schema_retry_malformed.json"), schema_retry_data)
+                fallback_payload = build_chat_payload(
+                    self.model,
+                    prompt,
+                    image_paths,
+                    use_schema=False,
+                    max_tokens=self.fallback_max_tokens,
+                )
+                fallback_response = self._post_chat_with_retries(fallback_payload)
+                fallback_data = fallback_response.json()
+                if raw_response_path:
+                    _write_json(raw_response_path, fallback_data)
+                if "choices" not in fallback_data:
+                    message = fallback_data.get("error", {}).get("message") or json.dumps(fallback_data)[:1000]
+                    raise RuntimeError(f"OpenRouter fallback response did not include choices: {message}")
+                fallback_response.raise_for_status()
+                return parse_json_response(fallback_data["choices"][0]["message"]["content"])
 
     def _post_chat(self, payload: dict[str, Any]) -> httpx.Response:
         return httpx.post(

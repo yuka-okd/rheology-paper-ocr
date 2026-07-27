@@ -187,6 +187,12 @@ def test_prompt_includes_deterministic_chart_geometry():
     assert "plot_bbox" in prompt
 
 
+def test_prompt_requires_the_endpoint_after_a_broken_axis():
+    prompt = build_extraction_prompt("paper_0003", "paper.pdf", "Figure 2 has a broken time axis.")
+
+    assert "far-right point as the end" in prompt
+
+
 def test_successful_fibres_only_prompt_omits_non_successful_series():
     prompt = build_extraction_prompt(
         "paper_0003",
@@ -450,7 +456,7 @@ def test_client_retries_without_schema_after_malformed_schema_response(monkeypat
     result = client.extract("Extract.", [], raw_response_path=tmp_path / "raw.json")
 
     assert result["findings"] == []
-    assert [payload["response_format"]["type"] for payload in payloads] == ["json_schema", "json_object"]
+    assert [payload["response_format"]["type"] for payload in payloads] == ["json_schema", "json_schema"]
     assert [payload["max_tokens"] for payload in payloads] == [3000, 6000]
     assert (tmp_path / "raw_malformed_schema.json").exists()
 

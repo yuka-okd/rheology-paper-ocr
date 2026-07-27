@@ -114,8 +114,9 @@ Rules:
 - A rheology chart includes viscosity/shear rate, shear stress, modulus, frequency sweep, or flow curve plots.
 - This workflow is limited to bulk shear rheology. Do not report extensional/elongational viscosity, capillary-breakup, or filament-thinning plots, even when they are relevant to electrospinning.
 - Treat an axis labelled "strain rate" or "extension rate" as out of scope unless it explicitly says "shear rate".
-- Digitize at most three well-spaced approximate points per series: start, a turning point if present, and end.
-- `color_traces` are uncalibrated pixel traces. Use only to cross-check visual direction and curve count; never treat their pixels as values or use them for legend mapping.
+- Digitize at most three approximate points per series: start, turning point, and end.
+- On a broken x axis, use the far-right point as the end.
+- `color_traces` only cross-check count/direction, never values or legend mappings.
 - A concentration-viscosity plot is not a flow curve. Extract its points, axes, and series mapping, but do not call its increase "shear-thickening".
 - Map each line to the sample/formulation using legend, caption, nearby text, methods, or tables.
 - Fibre outcome is text-only. Do not infer fibre formation from SEM images.
