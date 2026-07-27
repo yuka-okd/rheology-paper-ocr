@@ -451,6 +451,7 @@ def test_client_retries_without_schema_after_malformed_schema_response(monkeypat
 
     assert result["findings"] == []
     assert [payload["response_format"]["type"] for payload in payloads] == ["json_schema", "json_object"]
+    assert [payload["max_tokens"] for payload in payloads] == [3000, 6000]
     assert (tmp_path / "raw_malformed_schema.json").exists()
 
 

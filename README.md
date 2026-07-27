@@ -43,7 +43,7 @@ python3 -m pip install -e '.[raster]'
 ```
 
 Use `--text-only` to skip chart images, or `--resume` to reuse a completed paper only when its source hash is unchanged.
-Set `OPENROUTER_MAX_TOKENS` to change the per-page extraction response budget; it defaults to `3000` to keep first-pass runs bounded.
+Set `OPENROUTER_MAX_TOKENS` to change the per-page extraction response budget; it defaults to `3000` to keep first-pass runs bounded. If a response is malformed or cut off, the JSON-only retry automatically uses at least `6000` tokens; set `OPENROUTER_FALLBACK_MAX_TOKENS` to change that retry budget.
 
 ```bash
 python3 -m rheology_paper_ocr.cli inspect /path/to/paper.pdf --out outputs/inspect-paper

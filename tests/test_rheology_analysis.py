@@ -49,6 +49,17 @@ def test_summarizes_start_end_and_fold_change():
     assert summary.fold_change == 0.1
 
 
+def test_retains_zero_start_on_a_linear_axis_for_summary_and_quality():
+    series = make_series([(0, 2650), (4, 600), (80, 30)])
+
+    summary = summarize_series(series, x_axis_label="Time")
+
+    assert (summary.start_x, summary.start_y) == (0, 2650)
+    assert (summary.end_x, summary.end_y) == (80, 30)
+    assert summary.fold_change == 30 / 2650
+    assert not any("excluded" in warning for warning in series_quality_warnings(series, x_axis_label="Time"))
+
+
 def test_marks_two_point_series_as_unclear_for_classification():
     series = make_series([(1, 1000), (100, 100)])
 

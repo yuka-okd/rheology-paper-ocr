@@ -66,6 +66,10 @@ class OpenRouterClient:
         self.base_url = (base_url or os.environ.get("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1").rstrip("/")
         self.model = model or os.environ.get("OPENROUTER_MODEL") or "anthropic/claude-sonnet-4.6"
         self.max_tokens = int(os.environ.get("OPENROUTER_MAX_TOKENS", "3000"))
+        self.fallback_max_tokens = max(
+            self.max_tokens,
+            int(os.environ.get("OPENROUTER_FALLBACK_MAX_TOKENS", "6000")),
+        )
 
     def extract(self, prompt: str, image_paths: list[Path], raw_response_path: Path | None = None) -> dict[str, Any]:
         payload = build_chat_payload(self.model, prompt, image_paths, use_schema=True, max_tokens=self.max_tokens)
@@ -89,7 +93,16 @@ class OpenRouterClient:
         except json.JSONDecodeError:
             if raw_response_path:
                 _write_json(raw_response_path.with_name(f"{raw_response_path.stem}_malformed_schema.json"), data)
-            fallback_payload = build_chat_payload(self.model, prompt, image_paths, use_schema=False, max_tokens=self.max_tokens)
+            # Some reasoning-capable models consume the first response budget
+            # before they emit complete JSON. Give the repair pass enough room
+            # to finish while retaining the cheaper first attempt by default.
+            fallback_payload = build_chat_payload(
+                self.model,
+                prompt,
+                image_paths,
+                use_schema=False,
+                max_tokens=self.fallback_max_tokens,
+            )
             fallback_response = self._post_chat_with_retries(fallback_payload)
             fallback_data = fallback_response.json()
             if raw_response_path:
