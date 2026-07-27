@@ -16,7 +16,7 @@ from rheology_paper_ocr.docling_figures import (
     page_is_explicitly_non_rheology,
     select_chart_figures,
 )
-from rheology_paper_ocr.openrouter_client import OpenRouterClient
+from rheology_paper_ocr.openrouter_client import OpenRouterClient, OpenRouterInsufficientCreditsError
 from rheology_paper_ocr.native_graphics import inspect_native_graphics
 from rheology_paper_ocr.pdf_extract import RHEOLOGY_KEYWORDS, discover_pdfs, extract_text_and_pages, file_sha256
 from rheology_paper_ocr.report import write_reports
@@ -353,6 +353,7 @@ def _run_papers(
     manifest: list[dict] = []
 
     for paper in papers:
+        stop_after_paper = False
         paper_dir = papers_dir / paper.paper_id
         llm_dir = paper_dir / "llm"
         sha256 = file_sha256(paper.path)
@@ -507,12 +508,18 @@ def _run_papers(
                     "result_path": _relative_to_run(paper_dir / "results.json", out_dir),
                 }
             )
+        except OpenRouterInsufficientCreditsError as exc:
+            results_by_paper.pop(paper.paper_id, None)
+            status.update({"status": "blocked_insufficient_credits", "error": str(exc)})
+            stop_after_paper = True
         except Exception as exc:
             results_by_paper.pop(paper.paper_id, None)
             status.update({"status": "failed", "error": str(exc)})
         manifest.append(status)
         _write_manifest(out_dir, manifest)
         write_reports(out_dir, _flatten_results(results_by_paper, papers), _flatten_reviews(reviews_by_paper, papers))
+        if stop_after_paper:
+            break
 
     all_results = _flatten_results(results_by_paper, papers)
     _write_manifest(out_dir, manifest)

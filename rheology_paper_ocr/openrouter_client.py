@@ -11,6 +11,10 @@ import httpx
 from rheology_paper_ocr.schemas import PaperLLMExtraction
 
 
+class OpenRouterInsufficientCreditsError(RuntimeError):
+    """Raised when OpenRouter rejects a request because the account lacks credit."""
+
+
 
 def _image_data_url(path: Path) -> str:
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
@@ -89,6 +93,9 @@ class OpenRouterClient:
             self.last_model_used = self.model
             self.last_attempts.append({"model": self.model, "status": "succeeded"})
             return result
+        except OpenRouterInsufficientCreditsError as credit_error:
+            self.last_attempts.append({"model": self.model, "status": f"blocked: {credit_error}"})
+            raise
         except (httpx.HTTPError, RuntimeError, json.JSONDecodeError) as primary_error:
             self.last_attempts.append({"model": self.model, "status": f"failed: {primary_error}"})
             if not self.fallback_model or self.fallback_model == self.model:
@@ -116,12 +123,14 @@ class OpenRouterClient:
         payload = build_chat_payload(model, prompt, image_paths, use_schema=True, max_tokens=self.max_tokens)
         response = self._post_chat_with_retries(payload)
         data = response.json()
+        _raise_if_insufficient_credits(data)
         if "choices" not in data and _is_schema_rejection(data):
             if raw_response_path:
                 _write_json(raw_response_path.with_name(f"{raw_response_path.stem}_schema_rejected.json"), data)
             payload = build_chat_payload(model, prompt, image_paths, use_schema=False, max_tokens=self.max_tokens)
             response = self._post_chat_with_retries(payload)
             data = response.json()
+            _raise_if_insufficient_credits(data)
         if raw_response_path:
             _write_json(raw_response_path, data)
         if "choices" not in data:
@@ -146,6 +155,7 @@ class OpenRouterClient:
             )
             schema_retry_response = self._post_chat_with_retries(schema_retry_payload)
             schema_retry_data = schema_retry_response.json()
+            _raise_if_insufficient_credits(schema_retry_data)
             if raw_response_path:
                 _write_json(raw_response_path, schema_retry_data)
             if "choices" not in schema_retry_data:
@@ -166,6 +176,7 @@ class OpenRouterClient:
                 )
                 fallback_response = self._post_chat_with_retries(fallback_payload)
                 fallback_data = fallback_response.json()
+                _raise_if_insufficient_credits(fallback_data)
                 if raw_response_path:
                     _write_json(raw_response_path, fallback_data)
                 if "choices" not in fallback_data:
@@ -209,6 +220,14 @@ def _is_schema_rejection(data: dict[str, Any]) -> bool:
         return True
     message = (error.get("message") or "").lower()
     return "response_format" in message and ("schema" in message or "json_schema" in message)
+
+
+def _raise_if_insufficient_credits(data: dict[str, Any]) -> None:
+    error = data.get("error") or {}
+    message = str(error.get("message") or "")
+    lowered = message.lower()
+    if any(token in lowered for token in ("requires more credits", "can only afford", "insufficient credit", "not enough credits")):
+        raise OpenRouterInsufficientCreditsError(message)
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:

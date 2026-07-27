@@ -1,10 +1,11 @@
 from pathlib import Path
 
 import httpx
+import pytest
 
 from rheology_paper_ocr.openrouter_client import build_chat_payload
 from rheology_paper_ocr.extract_with_llm import build_extraction_prompt, normalize_extraction_payload
-from rheology_paper_ocr.openrouter_client import OpenRouterClient
+from rheology_paper_ocr.openrouter_client import OpenRouterClient, OpenRouterInsufficientCreditsError
 
 
 def test_builds_json_schema_vision_payload(tmp_path: Path):
@@ -528,6 +529,29 @@ def test_client_fails_over_to_configured_model_after_primary_timeouts(monkeypatc
     assert client.last_model_used == "fallback-model"
     assert client.last_attempts[-1] == {"model": "fallback-model", "status": "succeeded"}
     assert (tmp_path / "raw_fallback.json").exists()
+
+
+def test_client_does_not_fail_over_when_the_account_has_insufficient_credit(monkeypatch):
+    models = []
+
+    class FakeResponse:
+        def json(self):
+            return {"error": {"message": "This request requires more credits, or fewer max_tokens."}}
+
+        def raise_for_status(self):
+            return None
+
+    def fake_post(*args, **kwargs):
+        models.append(kwargs["json"]["model"])
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    client = OpenRouterClient(api_key="test-key", model="primary-model", fallback_model="fallback-model")
+
+    with pytest.raises(OpenRouterInsufficientCreditsError):
+        client.extract("Extract.", [])
+
+    assert models == ["primary-model"]
 
 
 def test_prompt_includes_relevant_late_rheology_context():

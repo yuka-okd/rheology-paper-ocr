@@ -3,6 +3,7 @@ from pathlib import Path
 
 import rheology_paper_ocr.pipeline as pipeline
 from rheology_paper_ocr.docling_figures import LocalizedFigure
+from rheology_paper_ocr.openrouter_client import OpenRouterInsufficientCreditsError
 from rheology_paper_ocr.pipeline import _extraction_requests, completion_status, is_review_article, load_saved_results, run_pipeline
 from rheology_paper_ocr.schemas import DataPoint, ExtractedFinding, FibreOutcome, JoinedResult, PaperLLMExtraction, SampleLink
 
@@ -96,6 +97,32 @@ def test_pipeline_persists_evidence_rows_and_skips_unchanged_completed_papers(mo
     assert (out_dir / "manifest.json").exists()
     assert (out_dir / "papers" / "paper_0001" / "results.json").exists()
     assert (out_dir / "report.html").exists()
+
+
+def test_pipeline_stops_after_insufficient_openrouter_credit(monkeypatch, tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "first.pdf").write_bytes(b"%PDF-1.4\n")
+    (source_dir / "second.pdf").write_bytes(b"%PDF-1.4\n")
+    page_image = tmp_path / "page_001.png"
+    page_image.write_bytes(b"image")
+
+    monkeypatch.setattr(pipeline, "OpenRouterClient", lambda model=None: object())
+    monkeypatch.setattr(pipeline, "extract_text_and_pages", lambda *_: ("Rheology chart", [page_image]))
+    monkeypatch.setattr(
+        pipeline,
+        "extract_paper_with_llm",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OpenRouterInsufficientCreditsError("requires more credits")),
+    )
+
+    out_dir = tmp_path / "output"
+    assert run_pipeline(source_dir, out_dir) == []
+
+    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert len(manifest) == 1
+    assert manifest[0]["paper_id"] == "paper_0001"
+    assert manifest[0]["status"] == "blocked_insufficient_credits"
+    assert manifest[0]["error"] == "requires more credits"
 
 
 def test_empty_pipeline_writes_empty_reports_without_openrouter(monkeypatch, tmp_path: Path):
