@@ -1,0 +1,44 @@
+{
+  "source_workbook": "Rheology Project Test.xlsx",
+  "matches": [
+    {
+      "doi": "10.1021/bm800738u",
+      "status": "matched_exact",
+      "paper_file": "paper-0089.pdf",
+      "archive_name": "Rheology Papers/correlation-of-chitosan-s-rheological-properties-and-its-ability-to-electrospin.pdf",
+      "title": "Correlation of Chitosan's Rheological Properties and Its Ability to Electrospin",
+      "evidence": "DOI appears on the first page of the PDF."
+    },
+    {
+      "doi": "10.2478/v10007-012-0018-x",
+      "status": "matched_exact",
+      "paper_file": "paper-0017.pdf",
+      "archive_name": "Rheology Papers/12312.pdf",
+      "title": "Interfacial rheology: An overview of measuring techniques and its role in dispersions and electrospinning",
+      "evidence": "DOI appears on the first page of the PDF.",
+      "caveat": "The paper is an interfacial-rheology review and does not match the workbook row's Chitosan:PEO description."
+    },
+    {
+      "doi": "10.1021/ma051786u",
+      "status": "matched_exact",
+      "paper_file": "paper-0013.pdf",
+      "archive_name": "Rheology Papers/solution-rheological-behavior-and-electrospinning-of-cationic-polyelectrolytes.pdf",
+      "title": "Solution Rheological Behavior and Electrospinning of Cationic Polyelectrolytes",
+      "evidence": "DOI appears on the first page of the PDF."
+    },
+    {
+      "doi": "10.1016/j.polymer.2004.10.049",
+      "status": "not_in_corpus",
+      "title": "Influence of self-complementary hydrogen bonding on solution rheology/electrospinning relationships",
+      "evidence": "The DOI occurs only as a reference in paper-0085.pdf. It is absent from all imported PDF first pages, full native text, archive names, and the original ZIP listing."
+    },
+    {
+      "doi": "10.1007/s12221-012-0044-9",
+      "status": "matched_exact",
+      "paper_file": "paper-0014.pdf",
+      "archive_name": "Rheology Papers/s12221-012-0044-9.pdf",
+      "title": "Electrospinning PVA Solution-Rheology and Morphology Analyses",
+      "evidence": "DOI appears on the first page of the PDF."
+    }
+  ]
+}
