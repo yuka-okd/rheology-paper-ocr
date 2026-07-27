@@ -2,7 +2,7 @@
 
 An evidence-first CLI for connecting rheology chart series in chemistry papers to the represented formulation and its reported fibre outcome.
 
-This is a screening and review workflow. It extracts sparse points to classify broad rheology behaviour; it does not claim publication-grade curve reconstruction.
+This is an evidence-first automation workflow. It extracts sparse points to classify broad rheology behaviour; it does not claim publication-grade curve reconstruction.
 
 ## What a result means
 
@@ -14,7 +14,7 @@ Each row represents one chart series and preserves:
 - a text-evidence-backed fibre outcome; and
 - confidence and warnings for review.
 
-Rows without enough curve evidence, an explicit sample link, or fibre evidence remain `unclear` or carry a warning. The tool must not infer fibre formation from microscopy images.
+Rows without enough curve evidence, an explicit sample link, or fibre evidence remain `unclear` or carry a warning. The tool must not infer fibre formation from microscopy images. Every row is also assigned `accepted` or `needs_review`; relevant charts without a supported row are preserved in the review queue.
 
 ## Run
 
@@ -52,17 +52,21 @@ outputs/run-001/
   manifest.json
   results.csv
   results.json
+  review_queue.csv         # candidates that need human adjudication
+  review_queue.json
   report.html
   papers/<paper_id>/
     text.md
     pages/
     figures/             # Docling-localized chart crops when available
+    native_graphics/     # high-resolution embedded chart assets when available
+    native_graphics.json # PDF vector/raster inventory for candidate pages
     docling_figures.json # figure bounding boxes and recovered captions
     llm/
     results.json
 ```
 
-Open `report.html` to review each extracted row alongside the page image and its warnings.
+Open `report.html` to review each extracted row alongside the page image and its decision. Use `review_queue.csv` for the deliberately small human adjudication queue.
 
 ## Validation boundary
 

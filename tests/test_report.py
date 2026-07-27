@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from rheology_paper_ocr.report import write_reports
-from rheology_paper_ocr.schemas import JoinedResult
+from rheology_paper_ocr.schemas import JoinedResult, ReviewCandidate
 
 
 def test_writes_csv_json_and_html(tmp_path: Path):
@@ -38,10 +38,13 @@ def test_writes_csv_json_and_html(tmp_path: Path):
         warnings=[],
     )
 
-    write_reports(tmp_path, [result])
+    review = ReviewCandidate(paper_id="paper_0001", source_pdf="paper.pdf", reasons=["sparse curve"])
+    write_reports(tmp_path, [result], [review])
 
     assert (tmp_path / "results.csv").exists()
     assert (tmp_path / "results.json").exists()
+    assert (tmp_path / "review_queue.csv").exists()
+    assert (tmp_path / "review_queue.json").exists()
     assert (tmp_path / "report.html").exists()
     data = json.loads((tmp_path / "results.json").read_text())
     assert data[0]["sample_id"] == "sample_a"

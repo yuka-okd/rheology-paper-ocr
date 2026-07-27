@@ -19,8 +19,9 @@ from rheology_paper_ocr.openrouter_client import OpenRouterClient
 from rheology_paper_ocr.native_graphics import inspect_native_graphics
 from rheology_paper_ocr.pdf_extract import RHEOLOGY_KEYWORDS, discover_pdfs, extract_text_and_pages, file_sha256
 from rheology_paper_ocr.report import write_reports
+from rheology_paper_ocr.review import apply_decision_policy, paper_review_candidate
 from rheology_paper_ocr.rheology_analysis import is_shear_rate_axis, series_quality_warnings, summarize_series
-from rheology_paper_ocr.schemas import DigitizedSeries, JoinedResult, SourcePaper
+from rheology_paper_ocr.schemas import DigitizedSeries, JoinedResult, ReviewCandidate, SourcePaper
 
 
 COMPLETED_STATUSES = {"completed", "completed_no_findings"}
@@ -59,6 +60,13 @@ def load_manifest(out_dir: Path) -> list[dict]:
     if not manifest_path.exists():
         return []
     return json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+def load_saved_reviews(out_dir: Path) -> list[ReviewCandidate]:
+    path = out_dir / "review_queue.json"
+    if not path.exists():
+        return []
+    return [ReviewCandidate.model_validate(item) for item in json.loads(path.read_text(encoding="utf-8"))]
 
 
 def _write_manifest(out_dir: Path, manifest: list[dict]) -> None:
@@ -168,8 +176,19 @@ def _group_results(results: list[JoinedResult]) -> dict[str, list[JoinedResult]]
     return dict(grouped)
 
 
+def _group_reviews(reviews: list[ReviewCandidate]) -> dict[str, list[ReviewCandidate]]:
+    grouped: dict[str, list[ReviewCandidate]] = defaultdict(list)
+    for candidate in reviews:
+        grouped[candidate.paper_id].append(candidate)
+    return dict(grouped)
+
+
 def _flatten_results(results_by_paper: dict[str, list[JoinedResult]], papers: list[SourcePaper]) -> list[JoinedResult]:
     return [result for paper in papers for result in results_by_paper.get(paper.paper_id, [])]
+
+
+def _flatten_reviews(reviews_by_paper: dict[str, list[ReviewCandidate]], papers: list[SourcePaper]) -> list[ReviewCandidate]:
+    return [candidate for paper in papers for candidate in reviews_by_paper.get(paper.paper_id, [])]
 
 
 def _finding_results(extractions, paper: SourcePaper) -> list[JoinedResult]:
@@ -324,9 +343,10 @@ def _run_papers(
 
     previous_statuses = {item.get("paper_id"): item for item in load_manifest(out_dir)} if resume else {}
     results_by_paper = _group_results(load_saved_results(out_dir)) if resume else {}
+    reviews_by_paper = _group_reviews(load_saved_reviews(out_dir)) if resume else {}
     if not papers:
         _write_manifest(out_dir, [])
-        write_reports(out_dir, [])
+        write_reports(out_dir, [], [])
         return []
     client = OpenRouterClient(model=model)
     manifest: list[dict] = []
@@ -369,6 +389,7 @@ def _run_papers(
                 native_graphics = []
             if screen_reviews and is_review_article(text):
                 results_by_paper[paper.paper_id] = []
+                reviews_by_paper[paper.paper_id] = []
                 _write_paper_results(paper_dir, [])
                 status.update(
                     {
@@ -380,7 +401,7 @@ def _run_papers(
                 )
                 manifest.append(status)
                 _write_manifest(out_dir, manifest)
-                write_reports(out_dir, _flatten_results(results_by_paper, papers))
+                write_reports(out_dir, _flatten_results(results_by_paper, papers), _flatten_reviews(reviews_by_paper, papers))
                 continue
             extractions = []
             localized_figures, localization_warning, localization_source = _localize_chart_figures(
@@ -425,7 +446,8 @@ def _run_papers(
                 )
                 extractions.append(extraction)
 
-            paper_results = _finding_results(extractions, paper)
+            all_paper_results, paper_reviews = apply_decision_policy(_finding_results(extractions, paper))
+            paper_results = all_paper_results
             excluded_non_successful = 0
             if successful_fibres_only:
                 filtered_results = [
@@ -433,7 +455,17 @@ def _run_papers(
                 ]
                 excluded_non_successful = len(paper_results) - len(filtered_results)
                 paper_results = filtered_results
+            if not all_paper_results and any(extraction.has_rheology_chart for extraction in extractions):
+                warnings = [warning for extraction in extractions for warning in extraction.paper_warnings]
+                paper_reviews.append(
+                    paper_review_candidate(
+                        paper.paper_id,
+                        str(paper.path),
+                        warnings or ["rheology chart detected but no series met the evidence policy"],
+                    )
+                )
             results_by_paper[paper.paper_id] = paper_results
+            reviews_by_paper[paper.paper_id] = paper_reviews
             _write_paper_results(paper_dir, paper_results)
             status.update(
                 {
@@ -447,6 +479,7 @@ def _run_papers(
                     "text_only": text_only,
                     "successful_fibres_only": successful_fibres_only,
                     "excluded_non_successful_findings": excluded_non_successful,
+                    "review_candidates": len(paper_reviews),
                     "findings": len(paper_results),
                     "result_path": _relative_to_run(paper_dir / "results.json", out_dir),
                 }
@@ -456,9 +489,9 @@ def _run_papers(
             status.update({"status": "failed", "error": str(exc)})
         manifest.append(status)
         _write_manifest(out_dir, manifest)
-        write_reports(out_dir, _flatten_results(results_by_paper, papers))
+        write_reports(out_dir, _flatten_results(results_by_paper, papers), _flatten_reviews(reviews_by_paper, papers))
 
     all_results = _flatten_results(results_by_paper, papers)
     _write_manifest(out_dir, manifest)
-    write_reports(out_dir, all_results)
+    write_reports(out_dir, all_results, _flatten_reviews(reviews_by_paper, papers))
     return all_results

@@ -5,13 +5,13 @@ import html
 import json
 from pathlib import Path
 
-from rheology_paper_ocr.schemas import JoinedResult
+from rheology_paper_ocr.schemas import JoinedResult, ReviewCandidate
 
 
 CSV_FIELDS = list(JoinedResult.model_fields.keys())
 
 
-def write_reports(out_dir: Path, results: list[JoinedResult]) -> None:
+def write_reports(out_dir: Path, results: list[JoinedResult], review_candidates: list[ReviewCandidate] | None = None) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     with (out_dir / "results.json").open("w", encoding="utf-8") as handle:
         json.dump([result.model_dump(mode="json") for result in results], handle, indent=2)
@@ -22,6 +22,17 @@ def write_reports(out_dir: Path, results: list[JoinedResult]) -> None:
         for result in results:
             row = result.model_dump(mode="json")
             row["warnings"] = "; ".join(row.get("warnings") or [])
+            writer.writerow(row)
+
+    reviews = review_candidates or []
+    with (out_dir / "review_queue.json").open("w", encoding="utf-8") as handle:
+        json.dump([candidate.model_dump(mode="json") for candidate in reviews], handle, indent=2)
+    with (out_dir / "review_queue.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(ReviewCandidate.model_fields.keys()))
+        writer.writeheader()
+        for candidate in reviews:
+            row = candidate.model_dump(mode="json")
+            row["reasons"] = "; ".join(row.get("reasons") or [])
             writer.writerow(row)
 
     rows = []
@@ -41,6 +52,7 @@ def write_reports(out_dir: Path, results: list[JoinedResult]) -> None:
             f"<td>{html.escape(result.fibre_outcome)}</td>"
             f"<td>{html.escape(result.fibre_evidence_text or '')}</td>"
             f"<td>{html.escape(result.confidence)}</td>"
+            f"<td>{html.escape(result.decision)}</td>"
             f"<td>{html.escape('; '.join(result.warnings))}</td>"
             "</tr>"
         )
@@ -62,7 +74,7 @@ def write_reports(out_dir: Path, results: list[JoinedResult]) -> None:
   <h1>Rheology Paper OCR Report</h1>
   <table>
     <thead>
-      <tr><th>Paper</th><th>Figure</th><th>Chart</th><th>Curve</th><th>Sample</th><th>Rheology</th><th>Fibre Outcome</th><th>Evidence</th><th>Confidence</th><th>Warnings</th></tr>
+      <tr><th>Paper</th><th>Figure</th><th>Chart</th><th>Curve</th><th>Sample</th><th>Rheology</th><th>Fibre Outcome</th><th>Evidence</th><th>Confidence</th><th>Decision</th><th>Warnings</th></tr>
     </thead>
     <tbody>
       {''.join(rows)}

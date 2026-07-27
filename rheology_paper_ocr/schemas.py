@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 
 Confidence = Literal["high", "medium", "low", "unclear"]
+Decision = Literal["accepted", "needs_review"]
 
 
 class SourcePaper(BaseModel):
@@ -132,3 +133,18 @@ class JoinedResult(BaseModel):
     fibre_evidence_source: str | None = None
     confidence: Confidence = "unclear"
     warnings: list[str] = Field(default_factory=list)
+    decision: Decision = "needs_review"
+    review_reasons: list[str] = Field(default_factory=list)
+
+
+class ReviewCandidate(BaseModel):
+    paper_id: str
+    source_pdf: str
+    figure_id: str | None = None
+    page: int | None = None
+    chart_crop_path: str | None = None
+    curve_id: str | None = None
+    sample_display_name: str | None = None
+    fibre_outcome: str | None = None
+    confidence: Confidence = "unclear"
+    reasons: list[str] = Field(default_factory=list)

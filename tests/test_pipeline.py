@@ -168,3 +168,33 @@ def test_successful_fibres_only_filters_unlinked_and_failed_rows(monkeypatch, tm
     results = run_pipeline(source_dir, tmp_path / "output", successful_fibres_only=True)
 
     assert [result.curve_id for result in results] == ["formed"]
+
+
+def test_queues_relevant_chart_without_supported_series(monkeypatch, tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    pdf_path = source_dir / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n")
+    page_image = tmp_path / "page_001.png"
+    page_image.write_bytes(b"image")
+
+    monkeypatch.setattr(pipeline, "OpenRouterClient", lambda model=None: object())
+    monkeypatch.setattr(pipeline, "extract_text_and_pages", lambda *_: ("Rheology chart", [page_image]))
+    monkeypatch.setattr(
+        pipeline,
+        "extract_paper_with_llm",
+        lambda *args, **kwargs: PaperLLMExtraction(
+            paper_id="paper_0001",
+            source_pdf="paper.pdf",
+            has_rheology_chart=True,
+            findings=[],
+            paper_warnings=["A rheology chart is visible but no exact formulation link was found."],
+        ),
+    )
+
+    out_dir = tmp_path / "output"
+    assert run_pipeline(source_dir, out_dir, successful_fibres_only=True) == []
+
+    review_queue = json.loads((out_dir / "review_queue.json").read_text(encoding="utf-8"))
+    assert review_queue[0]["paper_id"] == "paper_0001"
+    assert "no exact formulation link" in review_queue[0]["reasons"][0]
