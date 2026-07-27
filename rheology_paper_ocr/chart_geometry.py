@@ -12,6 +12,8 @@ class ChartGeometry:
     horizontal_line_count: int
     vertical_line_count: int
     ink_fraction: float
+    x_tick_pixels: list[int]
+    y_tick_pixels: list[int]
 
     @property
     def has_plot_frame(self) -> bool:
@@ -40,13 +42,16 @@ def analyze_chart_geometry(image_path: Path) -> ChartGeometry:
     vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(12, height // 6))))
     horizontal_lines = _long_segments(horizontal, horizontal=True)
     vertical_lines = _long_segments(vertical, horizontal=False)
+    plot_bbox = _plot_bbox(horizontal_lines, vertical_lines)
     return ChartGeometry(
         image_width=width,
         image_height=height,
-        plot_bbox=_plot_bbox(horizontal_lines, vertical_lines),
+        plot_bbox=plot_bbox,
         horizontal_line_count=len(horizontal_lines),
         vertical_line_count=len(vertical_lines),
         ink_fraction=ink_fraction,
+        x_tick_pixels=_axis_ticks(binary, plot_bbox, x_axis=True),
+        y_tick_pixels=_axis_ticks(binary, plot_bbox, x_axis=False),
     )
 
 
@@ -70,3 +75,35 @@ def _plot_bbox(horizontal: list[tuple[int, int, int, int]], vertical: list[tuple
     top = min(segment[1] for segment in horizontal)
     bottom = max(segment[3] for segment in horizontal)
     return (left, top, right, bottom) if left < right and top < bottom else None
+
+
+def _axis_ticks(binary, plot_bbox: tuple[int, int, int, int] | None, x_axis: bool) -> list[int]:
+    """Find short marks crossing an axis, expressed in source-image pixels."""
+    import numpy as np
+
+    if plot_bbox is None:
+        return []
+    left, top, right, bottom = plot_bbox
+    if x_axis:
+        region = binary[max(0, bottom - 2) : min(binary.shape[0], bottom + 24), left:right]
+        counts = np.count_nonzero(region, axis=0)
+        coordinates = _run_centres(counts, minimum=4)
+        return [left + coordinate for coordinate in coordinates if coordinate > 2 and coordinate < right - left - 2]
+    region = binary[top:bottom, max(0, left - 24) : min(binary.shape[1], left + 3)]
+    counts = np.count_nonzero(region, axis=1)
+    coordinates = _run_centres(counts, minimum=4)
+    return [top + coordinate for coordinate in coordinates if coordinate > 2 and coordinate < bottom - top - 2]
+
+
+def _run_centres(counts, minimum: int) -> list[int]:
+    centres = []
+    start = None
+    for index, value in enumerate(counts):
+        if value >= minimum and start is None:
+            start = index
+        if start is not None and (value < minimum or index == len(counts) - 1):
+            end = index if value < minimum else index + 1
+            if end - start <= 12:
+                centres.append((start + end - 1) // 2)
+            start = None
+    return centres
