@@ -67,7 +67,7 @@ outputs/run-001/
     figures/             # Docling-localized chart crops when available
     native_graphics/     # high-resolution embedded chart assets when available
     native_graphics.json # PDF vector/raster inventory for candidate pages
-    chart_geometry/      # optional deterministic plot-frame measurements
+    chart_geometry/      # optional plot frame, tick candidates, and uncalibrated colour traces
     docling_figures.json # figure bounding boxes and recovered captions
     llm/
     results.json

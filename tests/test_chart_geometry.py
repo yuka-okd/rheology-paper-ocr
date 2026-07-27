@@ -31,3 +31,21 @@ def test_detects_plot_frame_from_axis_lines(tmp_path: Path):
     assert any(abs(tick - 100) <= 3 for tick in geometry.x_tick_pixels)
     assert any(abs(tick - 200) <= 3 for tick in geometry.x_tick_pixels)
     assert any(abs(tick - 140) <= 3 for tick in geometry.y_tick_pixels)
+
+
+def test_tracks_coloured_lines_from_the_left_axis_without_calibration(tmp_path: Path):
+    image = np.full((300, 400, 3), 255, dtype=np.uint8)
+    cv2.rectangle(image, (50, 30), (350, 250), (0, 0, 0), 2)
+    cv2.polylines(image, [np.array([(50, 70), (150, 110), (250, 170), (350, 210)])], False, (0, 0, 220), 3)
+    cv2.polylines(image, [np.array([(50, 190), (150, 160), (250, 120), (350, 90)])], False, (210, 80, 20), 3)
+    path = tmp_path / "coloured-chart.png"
+    cv2.imwrite(str(path), image)
+
+    geometry = analyze_chart_geometry(path)
+
+    assert len(geometry.color_traces) == 2
+    assert {trace.visual_direction for trace in geometry.color_traces} == {
+        "downward left-to-right",
+        "upward left-to-right",
+    }
+    assert all(len(trace.sampled_pixels) >= 4 for trace in geometry.color_traces)
