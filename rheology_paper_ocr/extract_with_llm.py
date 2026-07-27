@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +76,7 @@ def build_extraction_prompt(
         "This is a text-only pass. Identify rheology figures and fibre outcomes from text, captions, and tables only. "
         "Do not invent chart points; leave points empty when chart data cannot be read from text."
         if text_only
-        else "Use the attached page image to inspect one candidate chart page. If several images are attached, they show the same page: use the full page for context and any magnified detail crop for marker-to-legend mapping and point digitization."
+        else "Use the attached page image to inspect one candidate chart page. If several images are attached, they show the same page: use the full page for context and any magnified detail crop or native embedded graphic for marker-to-legend mapping and point digitization."
     )
     target_instruction = (
         f"The target figure is {target_figure_id or 'the supplied crop'}. Its caption is: {target_figure_caption or 'not available'}. "
@@ -116,6 +117,7 @@ Rules:
 - Map each line to the sample/formulation using legend, caption, nearby text, methods, or tables.
 - Fibre outcome is text-only. Do not infer fibre formation from SEM images.
 - Fibre outcome must be "unclear" unless the text explicitly links that exact sample/formulation to fibre formation, beaded fibres, failure/no fibres, or not tested. Do not attach a broad molecular-weight or concentration rule to a borderline or differently named series.
+- A group statement such as "blended solutions formed fibres" is not evidence for an individual plotted series unless it defines a numerical or compositional range that unambiguously includes that series.
 - Evidence text should be a short exact or near-exact sentence/phrase from the paper text, caption, or table.
 - If there are no rheology charts, return has_rheology_chart=false and findings=[].
 
@@ -409,6 +411,11 @@ def _apply_finding_defaults(
         fibre["outcome"] = "unclear"
         fibre["confidence"] = "unclear"
         warnings.append("fibre outcome lacks text evidence")
+    elif fibre.get("outcome") not in {"unclear", "not tested"} and _is_group_only_fibre_evidence(item, fibre):
+        fibre = dict(fibre)
+        fibre["outcome"] = "unclear"
+        fibre["confidence"] = "unclear"
+        warnings.append("fibre outcome is supported only by group-level evidence")
     item["fibre_outcome"] = fibre
     item["warnings"] = warnings
     return item
@@ -479,6 +486,34 @@ def _is_explicitly_non_rheology_finding(finding: dict[str, Any]) -> bool:
     if ("strain rate" in x_axis or "extension rate" in x_axis) and "shear" not in x_axis:
         return True
     return any(term in axes for term in ("extensional", "elongational", "capillary breakup", "filament thinning"))
+
+
+def _is_group_only_fibre_evidence(finding: dict[str, Any], fibre: dict[str, Any]) -> bool:
+    evidence = _normalized_evidence(fibre.get("evidence_text"))
+    group_terms = ("blended solutions", "all solutions", "these solutions", "the solutions")
+    if not any(term in evidence for term in group_terms):
+        return False
+    sample = finding.get("sample") or {}
+    sample_id = str(sample.get("sample_id") or "").strip()
+    if sample_id and f"sample {sample_id.lower()}" in evidence:
+        return False
+    composition = " ".join(
+        str(sample.get(field) or "")
+        for field in ("sample_display_name", "sample_composition")
+    )
+    return not any(specification in evidence for specification in _composition_specifications(composition))
+
+
+def _normalized_evidence(value: Any) -> str:
+    return " ".join(str(value or "").lower().replace("ﬁ", "fi").split())
+
+
+def _composition_specifications(value: str) -> set[str]:
+    normalized = _normalized_evidence(value)
+    return {
+        " ".join(match.group(0).split())
+        for match in re.finditer(r"\b\d+(?:\.\d+)?\s*(?:wt\s*%|%|:\s*\d+)\b", normalized)
+    }
 
 
 def _normalize_fibre_outcome(outcome: str | None, evidence_text: str | None = None) -> str:

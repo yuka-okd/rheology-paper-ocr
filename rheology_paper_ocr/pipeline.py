@@ -11,10 +11,12 @@ from rheology_paper_ocr.docling_figures import (
     DoclingFigureError,
     LocalizedFigure,
     localize_figures,
+    localize_native_chart_graphics,
     page_is_explicitly_non_rheology,
     select_chart_figures,
 )
 from rheology_paper_ocr.openrouter_client import OpenRouterClient
+from rheology_paper_ocr.native_graphics import inspect_native_graphics
 from rheology_paper_ocr.pdf_extract import RHEOLOGY_KEYWORDS, discover_pdfs, extract_text_and_pages, file_sha256
 from rheology_paper_ocr.report import write_reports
 from rheology_paper_ocr.rheology_analysis import is_shear_rate_axis, series_quality_warnings, summarize_series
@@ -82,16 +84,30 @@ def _localize_chart_figures(
     image_paths: list[Path],
     paper_dir: Path,
     use_docling_figures: bool,
-) -> tuple[list[LocalizedFigure], str | None]:
-    if not use_docling_figures:
-        return [], None
+) -> tuple[list[LocalizedFigure], str | None, str]:
     page_numbers = [page for image_path in image_paths if (page := _page_number(image_path)) is not None]
+    if not use_docling_figures:
+        return _localize_native_chart_graphics(pdf_path, page_numbers, paper_dir, None)
     try:
-        return localize_figures(pdf_path, page_numbers, paper_dir), None
+        return localize_figures(pdf_path, page_numbers, paper_dir), None, "docling"
     except DoclingFigureError as exc:
         # Figure crops improve accuracy, but a missing optional local model must
         # never block a paid extraction run.
-        return [], str(exc)
+        return _localize_native_chart_graphics(pdf_path, page_numbers, paper_dir, str(exc))
+
+
+def _localize_native_chart_graphics(
+    pdf_path: Path,
+    page_numbers: list[int],
+    paper_dir: Path,
+    warning: str | None,
+) -> tuple[list[LocalizedFigure], str | None, str]:
+    try:
+        figures = localize_native_chart_graphics(pdf_path, page_numbers, paper_dir)
+        return figures, warning, "native_graphics" if figures else "none"
+    except Exception as exc:
+        detail = f"native graphic localization failed: {exc}"
+        return [], detail if warning is None else f"{warning}; {detail}", "none"
 
 
 def _extraction_requests(
@@ -339,6 +355,18 @@ def _run_papers(
         }
         try:
             text, image_paths = extract_text_and_pages(paper.path, paper_dir)
+            try:
+                native_graphics = inspect_native_graphics(
+                    paper.path,
+                    [page for image_path in image_paths if (page := _page_number(image_path)) is not None],
+                )
+                (paper_dir / "native_graphics.json").write_text(
+                    json.dumps([page.to_dict() for page in native_graphics], indent=2),
+                    encoding="utf-8",
+                )
+            except Exception:
+                # This is diagnostic evidence only; standard page extraction remains the fallback.
+                native_graphics = []
             if screen_reviews and is_review_article(text):
                 results_by_paper[paper.paper_id] = []
                 _write_paper_results(paper_dir, [])
@@ -355,7 +383,7 @@ def _run_papers(
                 write_reports(out_dir, _flatten_results(results_by_paper, papers))
                 continue
             extractions = []
-            localized_figures, localization_warning = _localize_chart_figures(
+            localized_figures, localization_warning, localization_source = _localize_chart_figures(
                 paper.path,
                 image_paths,
                 paper_dir,
@@ -375,6 +403,8 @@ def _run_papers(
                 if target_figure is not None:
                     attached_images.append(target_figure.crop_path)
                     chart_crop_path = _relative_to_run(target_figure.crop_path, out_dir)
+                    if target_figure.native_graphic_path and target_figure.native_graphic_path != target_figure.crop_path:
+                        attached_images.append(target_figure.native_graphic_path)
                 extraction = extract_paper_with_llm(
                     client,
                     paper.paper_id,
@@ -413,6 +443,7 @@ def _run_papers(
                     "docling_all_figures": [figure.to_dict() for figure in localized_figures],
                     "skipped_candidate_pages": _skipped_page_numbers(image_paths, requests),
                     "docling_warning": localization_warning,
+                    "figure_localization_source": localization_source,
                     "text_only": text_only,
                     "successful_fibres_only": successful_fibres_only,
                     "excluded_non_successful_findings": excluded_non_successful,

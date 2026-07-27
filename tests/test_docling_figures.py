@@ -7,9 +7,11 @@ from rheology_paper_ocr.docling_figures import (
     _caption_for_picture,
     _figure_id,
     _localized_figures_from_document,
+    _native_graphic_caption,
     page_is_explicitly_non_rheology,
     select_chart_figures,
 )
+from rheology_paper_ocr.native_graphics import NativeGraphic
 
 
 def test_recovers_caption_and_figure_identifier_from_docling_references():
@@ -98,3 +100,17 @@ def test_renders_docling_picture_bbox_on_original_page(tmp_path: Path):
     assert figures[0].crop_path.exists()
     assert figures[0].vector_text is not None
     assert figures[0].picture_type == "line_chart"
+
+
+def test_native_caption_uses_only_the_caption_sentence_and_normalizes_ligatures():
+    graphic = NativeGraphic(
+        page=1,
+        xref=1,
+        bbox=(0, 0, 1, 1),
+        width=100,
+        height=100,
+        effective_scale=4,
+        nearby_text="Figure 4. Nanoﬁbers with ﬁber diameter. Nearby rheology prose is not part of the caption.",
+    )
+
+    assert _native_graphic_caption(graphic) is None

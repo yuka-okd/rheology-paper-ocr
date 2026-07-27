@@ -186,6 +186,13 @@ def test_successful_fibres_only_prompt_omits_non_successful_series():
     assert "Omit failed, not-tested, and unclear series completely" in prompt
 
 
+def test_prompt_rejects_group_fibre_claims_for_individual_series():
+    prompt = build_extraction_prompt("paper_0003", "paper.pdf", "Blended solutions formed fibres.")
+
+    assert "group statement" in prompt
+    assert "individual plotted series" in prompt
+
+
 
 
 def test_downgrades_unsupported_fibre_outcomes_to_unclear():
@@ -200,6 +207,29 @@ def test_downgrades_unsupported_fibre_outcomes_to_unclear():
     finding = normalized["findings"][0]
     assert finding["fibre_outcome"]["outcome"] == "unclear"
     assert "fibre outcome lacks text evidence" in finding["warnings"]
+
+
+def test_downgrades_group_level_fibre_evidence_without_matching_composition():
+    payload = {
+        "paper_id": "paper_0003",
+        "has_rheology_chart": True,
+        "findings": [
+            {
+                "curve_id": "curve_a",
+                "sample": {"sample_composition": "CS:PEO 5:2, total polymer 4.2 wt%"},
+                "fibre_outcome": {
+                    "outcome": "formed fibres",
+                    "evidence_text": "The blended solutions were able to be electrospun.",
+                },
+            }
+        ],
+    }
+
+    normalized = normalize_extraction_payload(payload, paper_id="paper_0003", source_pdf="paper.pdf")
+
+    finding = normalized["findings"][0]
+    assert finding["fibre_outcome"]["outcome"] == "unclear"
+    assert "fibre outcome is supported only by group-level evidence" in finding["warnings"]
 
 
 def test_drops_explicit_fibre_diameter_plot_from_rheology_findings():
@@ -454,7 +484,7 @@ def test_prompt_includes_relevant_late_rheology_context():
 
     assert "Intro only." in prompt
     assert "Fig. 2 shows viscosity" in prompt
-    assert len(prompt) < len(text) + 2400
+    assert len(prompt) < len(text) + 2700
 
 
 def test_normalizes_top_level_fibre_outcomes_without_dropping_evidence():

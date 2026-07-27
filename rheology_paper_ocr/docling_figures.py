@@ -8,6 +8,8 @@ from tempfile import TemporaryDirectory
 
 import fitz
 
+from rheology_paper_ocr.native_graphics import NativeGraphic, export_native_graphic, inspect_native_graphics
+
 
 CHART_CAPTION_KEYWORDS = (
     "rheolog",
@@ -38,6 +40,8 @@ NON_RHEOLOGY_CAPTION_RULES = (
 
 CHART_PICTURE_TYPES = {"line_chart", "scatter_plot", "bar_chart", "box_plot", "pie_chart"}
 PICTURE_CLASSIFICATION_CONFIDENCE = 0.8
+PAGE_RENDER_SCALE = 3.0
+NATIVE_GRAPHIC_MIN_SCALE = PAGE_RENDER_SCALE + 0.25
 
 
 class DoclingFigureError(RuntimeError):
@@ -55,10 +59,12 @@ class LocalizedFigure:
     vector_text: str | None = None
     picture_type: str | None = None
     picture_type_confidence: float | None = None
+    native_graphic_path: Path | None = None
 
     def to_dict(self) -> dict:
         data = asdict(self)
         data["crop_path"] = str(self.crop_path)
+        data["native_graphic_path"] = None if self.native_graphic_path is None else str(self.native_graphic_path)
         data["rheology_candidate"] = self.is_rheology_candidate
         data["exclusion_reason"] = self.exclusion_reason
         return data
@@ -126,6 +132,65 @@ def localize_figures(
         json.dumps([figure.to_dict() for figure in localized], indent=2), encoding="utf-8"
     )
     return localized
+
+
+def localize_native_chart_graphics(
+    pdf_path: Path,
+    candidate_pages: list[int],
+    paper_dir: Path,
+) -> list[LocalizedFigure]:
+    """Use high-resolution embedded PDF images when layout localization is unavailable."""
+    native_dir = paper_dir / "native_graphics"
+    localized: list[LocalizedFigure] = []
+    for page_graphics in inspect_native_graphics(pdf_path, candidate_pages):
+        for graphic in page_graphics.graphics:
+            caption = _native_graphic_caption(graphic)
+            relevance_score = _caption_relevance(caption)
+            if graphic.effective_scale < NATIVE_GRAPHIC_MIN_SCALE or relevance_score <= 0:
+                continue
+            if _caption_exclusion_reason(caption):
+                continue
+            crop_path = native_dir / f"page_{graphic.page:03d}_xref_{graphic.xref}.png"
+            export_native_graphic(pdf_path, graphic, crop_path)
+            localized.append(
+                LocalizedFigure(
+                    figure_id=_figure_id(caption),
+                    page=graphic.page,
+                    caption=caption,
+                    crop_path=crop_path,
+                    bbox=graphic.bbox,
+                    relevance_score=relevance_score,
+                    vector_text=None,
+                    native_graphic_path=crop_path,
+                )
+            )
+    return localized
+
+
+def _native_graphic_caption(graphic: NativeGraphic) -> str | None:
+    """Keep only caption-like fragments, not arbitrary body text near an image."""
+    text = graphic.nearby_text
+    matches = list(re.finditer(r"\b(?:figure|fig\.)\s*[0-9]+[a-z]?\.", text, flags=re.IGNORECASE))
+    candidates = [
+        _first_caption_sentence(
+            text[match.start() : matches[index + 1].start() if index + 1 < len(matches) else len(text)].strip()
+        )
+        for index, match in enumerate(matches)
+    ]
+    relevant = [
+        candidate
+        for candidate in candidates
+        if _caption_relevance(candidate) > 0 and _caption_exclusion_reason(candidate) is None
+    ]
+    return max(relevant, key=_caption_relevance, default=None)
+
+
+def _first_caption_sentence(candidate: str) -> str:
+    prefix = re.match(r"(?:figure|fig\.)\s*[0-9]+[a-z]?\.\s*", candidate, flags=re.IGNORECASE)
+    if not prefix:
+        return candidate
+    end = candidate.find(".", prefix.end())
+    return candidate if end == -1 else candidate[: end + 1]
 
 
 def select_chart_figures(figures: list[LocalizedFigure], max_per_page: int = 2) -> list[LocalizedFigure]:
@@ -198,11 +263,48 @@ def _localized_figures_from_document(
                     vector_text=_extract_vector_text(source_page, clip),
                     picture_type=picture_type,
                     picture_type_confidence=picture_type_confidence,
+                    native_graphic_path=_native_graphic_for_figure(
+                        source_pdf,
+                        page,
+                        clip,
+                        figures_dir,
+                        figure_id,
+                    ),
                 )
             )
     finally:
         source.close()
     return localized
+
+
+def _native_graphic_for_figure(
+    pdf_path: Path,
+    page_number: int,
+    figure_clip: fitz.Rect,
+    figures_dir: Path,
+    figure_id: str | None,
+) -> Path | None:
+    candidates = inspect_native_graphics(pdf_path, [page_number])[0].graphics
+    overlap_candidates = [
+        graphic
+        for graphic in candidates
+        if graphic.effective_scale >= NATIVE_GRAPHIC_MIN_SCALE
+        and _overlap_ratio(fitz.Rect(graphic.bbox), figure_clip) >= 0.7
+    ]
+    if not overlap_candidates:
+        return None
+    graphic = max(overlap_candidates, key=lambda item: item.effective_scale)
+    suffix = _safe_identifier(figure_id or f"xref_{graphic.xref}")
+    target = figures_dir / f"page_{page_number:03d}_{suffix}_native.png"
+    export_native_graphic(pdf_path, graphic, target)
+    return target
+
+
+def _overlap_ratio(first: fitz.Rect, second: fitz.Rect) -> float:
+    overlap = first & second
+    if overlap.is_empty or first.get_area() == 0:
+        return 0.0
+    return overlap.get_area() / first.get_area()
 
 
 def _bbox_coordinates(bbox: dict) -> tuple[float, float, float, float] | None:
@@ -257,16 +359,20 @@ def _safe_identifier(value: str) -> str:
 
 
 def _caption_relevance(caption: str | None) -> int:
-    lowered = (caption or "").lower()
+    lowered = _normalized_caption(caption)
     return sum(keyword in lowered for keyword in CHART_CAPTION_KEYWORDS)
 
 
 def _caption_exclusion_reason(caption: str | None) -> str | None:
-    lowered = (caption or "").lower()
+    lowered = _normalized_caption(caption)
     for keyword, reason in NON_RHEOLOGY_CAPTION_RULES:
         if keyword in lowered:
             return reason
     return None
+
+
+def _normalized_caption(caption: str | None) -> str:
+    return (caption or "").lower().replace("ﬁ", "fi").replace("ﬂ", "fl")
 
 
 def _crop_rect(page: fitz.Page, bbox: tuple[float, float, float, float]) -> fitz.Rect:
