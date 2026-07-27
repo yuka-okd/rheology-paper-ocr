@@ -68,6 +68,7 @@ def build_extraction_prompt(
     attached_page: int | None = None,
     target_figure_id: str | None = None,
     target_figure_caption: str | None = None,
+    successful_fibres_only: bool = False,
 ) -> str:
     clipped_text = select_prompt_context(text)
     mode_instruction = (
@@ -82,6 +83,12 @@ def build_extraction_prompt(
         if target_figure_id or target_figure_caption
         else ""
     )
+    success_filter_instruction = (
+        "Return findings only for series with explicit text evidence of formed fibres or formed beaded fibres. "
+        "Omit failed, not-tested, and unclear series completely."
+        if successful_fibres_only
+        else ""
+    )
     return f"""
 You are extracting rheology and text-only fibre outcome evidence from a chemistry paper.
 
@@ -92,6 +99,7 @@ Attached page: {attached_page if attached_page is not None else "none (text-only
 {mode_instruction} Use the text below for captions, legends,
 sample definitions, formulation aliases, and fibre outcome evidence.
 {target_instruction}
+{success_filter_instruction}
 
 Return ONLY valid JSON matching the provided schema.
 
@@ -101,6 +109,8 @@ Rules:
 - Set x_axis_scale and y_axis_scale to "linear", "log", or "unclear". Keep points in ascending x order.
 - Return the flat finding schema directly. Do not wrap findings in a chart object or add figure captions, chart type, or trend prose.
 - A rheology chart includes viscosity/shear rate, shear stress, modulus, frequency sweep, or flow curve plots.
+- This workflow is limited to bulk shear rheology. Do not report extensional/elongational viscosity, capillary-breakup, or filament-thinning plots, even when they are relevant to electrospinning.
+- Treat an axis labelled "strain rate" or "extension rate" as out of scope unless it explicitly says "shear rate".
 - Digitize at most three well-spaced approximate points per series: start, a turning point if present, and end.
 - A concentration-viscosity plot is not a flow curve. Extract its points, axes, and series mapping, but do not call its increase "shear-thickening".
 - Map each line to the sample/formulation using legend, caption, nearby text, methods, or tables.
@@ -126,6 +136,7 @@ def extract_paper_with_llm(
     chart_crop_path: str | None = None,
     target_figure_id: str | None = None,
     target_figure_caption: str | None = None,
+    successful_fibres_only: bool = False,
 ) -> PaperLLMExtraction:
     prompt = build_extraction_prompt(
         paper_id,
@@ -135,6 +146,7 @@ def extract_paper_with_llm(
         attached_page=page_number,
         target_figure_id=target_figure_id,
         target_figure_caption=target_figure_caption,
+        successful_fibres_only=successful_fibres_only,
     )
     raw = client.extract(prompt, image_paths, raw_response_path=raw_response_path)
     normalized = normalize_extraction_payload(
@@ -457,8 +469,16 @@ def _axis_label(axis: Any) -> str | None:
 
 
 def _is_explicitly_non_rheology_finding(finding: dict[str, Any]) -> bool:
-    y_axis = (finding.get("y_axis_label") or "").lower()
-    return "diameter" in y_axis or "diam" in y_axis
+    x_axis = str(finding.get("x_axis_label") or "").lower()
+    axes = " ".join(
+        str(finding.get(field) or "").lower()
+        for field in ("x_axis_label", "y_axis_label")
+    )
+    if "diameter" in axes or "diam" in axes:
+        return True
+    if ("strain rate" in x_axis or "extension rate" in x_axis) and "shear" not in x_axis:
+        return True
+    return any(term in axes for term in ("extensional", "elongational", "capillary breakup", "filament thinning"))
 
 
 def _normalize_fibre_outcome(outcome: str | None, evidence_text: str | None = None) -> str:

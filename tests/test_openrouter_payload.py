@@ -175,6 +175,17 @@ def test_target_figure_prompt_limits_a_crop_pass_to_the_localized_figure():
     assert "Extract only this figure" in prompt
 
 
+def test_successful_fibres_only_prompt_omits_non_successful_series():
+    prompt = build_extraction_prompt(
+        "paper_0003",
+        "paper.pdf",
+        "Sample A formed fibres.",
+        successful_fibres_only=True,
+    )
+
+    assert "Omit failed, not-tested, and unclear series completely" in prompt
+
+
 
 
 def test_downgrades_unsupported_fibre_outcomes_to_unclear():
@@ -220,6 +231,44 @@ def test_drops_abbreviated_diameter_axis_from_rheology_findings():
                 "curve_id": "curve_a",
                 "x_axis_label": "zero shear viscosity",
                 "y_axis_label": "Avg. Diam.",
+                "points": [{"x": 1, "y": 2}],
+            }
+        ],
+    }
+
+    normalized = normalize_extraction_payload(payload, paper_id="paper_0003", source_pdf="paper.pdf")
+
+    assert normalized["findings"] == []
+
+
+def test_drops_extensional_viscosity_plot_from_rheology_findings():
+    payload = {
+        "paper_id": "paper_0003",
+        "has_rheology_chart": True,
+        "findings": [
+            {
+                "curve_id": "curve_a",
+                "x_axis_label": "Extension rate",
+                "y_axis_label": "Apparent extensional viscosity",
+                "points": [{"x": 1, "y": 2}],
+            }
+        ],
+    }
+
+    normalized = normalize_extraction_payload(payload, paper_id="paper_0003", source_pdf="paper.pdf")
+
+    assert normalized["findings"] == []
+
+
+def test_drops_unqualified_strain_rate_plot_from_rheology_findings():
+    payload = {
+        "paper_id": "paper_0003",
+        "has_rheology_chart": True,
+        "findings": [
+            {
+                "curve_id": "curve_a",
+                "x_axis_label": "Strain rate",
+                "y_axis_label": "Viscosity",
                 "points": [{"x": 1, "y": 2}],
             }
         ],
@@ -405,7 +454,7 @@ def test_prompt_includes_relevant_late_rheology_context():
 
     assert "Intro only." in prompt
     assert "Fig. 2 shows viscosity" in prompt
-    assert len(prompt) < len(text) + 2000
+    assert len(prompt) < len(text) + 2400
 
 
 def test_normalizes_top_level_fibre_outcomes_without_dropping_evidence():

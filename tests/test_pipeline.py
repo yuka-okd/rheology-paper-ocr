@@ -3,7 +3,7 @@ from pathlib import Path
 
 import rheology_paper_ocr.pipeline as pipeline
 from rheology_paper_ocr.docling_figures import LocalizedFigure
-from rheology_paper_ocr.pipeline import _extraction_requests, completion_status, load_saved_results, run_pipeline
+from rheology_paper_ocr.pipeline import _extraction_requests, completion_status, is_review_article, load_saved_results, run_pipeline
 from rheology_paper_ocr.schemas import DataPoint, ExtractedFinding, FibreOutcome, JoinedResult, PaperLLMExtraction, SampleLink
 
 
@@ -17,6 +17,11 @@ def test_completion_status_marks_extracted_rows_as_completed():
     text = "The viscosity was measured as a function of shear rate in Fig. 2."
 
     assert completion_status(text=text, findings_count=2) == "completed"
+
+
+def test_detects_review_label_in_opening_document_text():
+    assert is_review_article("Title\nReview\nDOI: 10.1234/example") is True
+    assert is_review_article("Title\nExperimental article\nResults") is False
 
 
 def test_loads_saved_results_for_report_regeneration(tmp_path):
@@ -133,3 +138,33 @@ def test_skips_a_page_when_every_docling_figure_is_explicitly_non_rheology(tmp_p
     requests = _extraction_requests([page], [], text_only=False, localized_figures=[morphology])
 
     assert requests == []
+
+
+def test_successful_fibres_only_filters_unlinked_and_failed_rows(monkeypatch, tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    pdf_path = source_dir / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n")
+    page_image = tmp_path / "page_001.png"
+    page_image.write_bytes(b"image")
+
+    monkeypatch.setattr(pipeline, "OpenRouterClient", lambda model=None: object())
+    monkeypatch.setattr(pipeline, "extract_text_and_pages", lambda *_: ("Experimental article", [page_image]))
+    monkeypatch.setattr(
+        pipeline,
+        "extract_paper_with_llm",
+        lambda *args, **kwargs: PaperLLMExtraction(
+            paper_id="paper_0001",
+            source_pdf="paper.pdf",
+            has_rheology_chart=True,
+            findings=[
+                ExtractedFinding(curve_id="formed", fibre_outcome=FibreOutcome(outcome="formed fibres", evidence_text="formed")),
+                ExtractedFinding(curve_id="unclear", fibre_outcome=FibreOutcome(outcome="unclear")),
+                ExtractedFinding(curve_id="failed", fibre_outcome=FibreOutcome(outcome="failed or no fibres", evidence_text="failed")),
+            ],
+        ),
+    )
+
+    results = run_pipeline(source_dir, tmp_path / "output", successful_fibres_only=True)
+
+    assert [result.curve_id for result in results] == ["formed"]

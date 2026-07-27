@@ -22,6 +22,7 @@ from rheology_paper_ocr.schemas import DigitizedSeries, JoinedResult, SourcePape
 
 
 COMPLETED_STATUSES = {"completed", "completed_no_findings"}
+SUCCESSFUL_FIBRE_OUTCOMES = {"formed fibres", "formed beaded fibres"}
 
 
 def _paper_index_from_id(paper_id: str) -> int:
@@ -35,6 +36,12 @@ def completion_status(text: str, findings_count: int) -> str:
     if any(keyword in lowered for keyword in RHEOLOGY_KEYWORDS):
         return "completed_no_findings"
     return "completed"
+
+
+def is_review_article(text: str) -> bool:
+    """Detect articles labelled as reviews in the opening document matter."""
+    opening = text[:6000].lower()
+    return "\nreview\n" in opening or "review article" in opening or "literature review" in opening
 
 
 def load_saved_results(out_dir: Path) -> list[JoinedResult]:
@@ -238,6 +245,8 @@ def run_pipeline(
     text_only: bool = False,
     resume: bool = False,
     use_docling_figures: bool = True,
+    successful_fibres_only: bool = False,
+    screen_reviews: bool = True,
 ) -> list[JoinedResult]:
     papers = discover_pdfs(pdf_dir)
     if max_papers is not None:
@@ -249,6 +258,8 @@ def run_pipeline(
         text_only=text_only,
         resume=resume,
         use_docling_figures=use_docling_figures,
+        successful_fibres_only=successful_fibres_only,
+        screen_reviews=screen_reviews,
     )
 
 
@@ -257,6 +268,8 @@ def resume_pipeline(
     model: str | None = None,
     text_only: bool = False,
     use_docling_figures: bool = True,
+    successful_fibres_only: bool = False,
+    screen_reviews: bool = True,
 ) -> list[JoinedResult]:
     manifest = load_manifest(out_dir)
     papers = [
@@ -273,6 +286,8 @@ def resume_pipeline(
         text_only=text_only,
         resume=True,
         use_docling_figures=use_docling_figures,
+        successful_fibres_only=successful_fibres_only,
+        screen_reviews=screen_reviews,
     )
 
 
@@ -283,6 +298,8 @@ def _run_papers(
     text_only: bool,
     resume: bool,
     use_docling_figures: bool,
+    successful_fibres_only: bool,
+    screen_reviews: bool,
 ) -> list[JoinedResult]:
     load_dotenv()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -322,6 +339,21 @@ def _run_papers(
         }
         try:
             text, image_paths = extract_text_and_pages(paper.path, paper_dir)
+            if screen_reviews and is_review_article(text):
+                results_by_paper[paper.paper_id] = []
+                _write_paper_results(paper_dir, [])
+                status.update(
+                    {
+                        "status": "completed_no_findings",
+                        "screened_out_reason": "document labelled as review article",
+                        "findings": 0,
+                        "result_path": _relative_to_run(paper_dir / "results.json", out_dir),
+                    }
+                )
+                manifest.append(status)
+                _write_manifest(out_dir, manifest)
+                write_reports(out_dir, _flatten_results(results_by_paper, papers))
+                continue
             extractions = []
             localized_figures, localization_warning = _localize_chart_figures(
                 paper.path,
@@ -355,6 +387,7 @@ def _run_papers(
                     chart_crop_path=chart_crop_path,
                     target_figure_id=None if target_figure is None else target_figure.figure_id,
                     target_figure_caption=None if target_figure is None else target_figure.caption,
+                    successful_fibres_only=successful_fibres_only,
                 )
                 (llm_dir / f"{page_suffix}_extraction.json").write_text(
                     extraction.model_dump_json(indent=2),
@@ -363,6 +396,13 @@ def _run_papers(
                 extractions.append(extraction)
 
             paper_results = _finding_results(extractions, paper)
+            excluded_non_successful = 0
+            if successful_fibres_only:
+                filtered_results = [
+                    result for result in paper_results if result.fibre_outcome in SUCCESSFUL_FIBRE_OUTCOMES
+                ]
+                excluded_non_successful = len(paper_results) - len(filtered_results)
+                paper_results = filtered_results
             results_by_paper[paper.paper_id] = paper_results
             _write_paper_results(paper_dir, paper_results)
             status.update(
@@ -374,6 +414,8 @@ def _run_papers(
                     "skipped_candidate_pages": _skipped_page_numbers(image_paths, requests),
                     "docling_warning": localization_warning,
                     "text_only": text_only,
+                    "successful_fibres_only": successful_fibres_only,
+                    "excluded_non_successful_findings": excluded_non_successful,
                     "findings": len(paper_results),
                     "result_path": _relative_to_run(paper_dir / "results.json", out_dir),
                 }

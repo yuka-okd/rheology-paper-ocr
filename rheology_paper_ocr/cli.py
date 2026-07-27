@@ -24,6 +24,16 @@ def run(
         "--docling-figures/--no-docling-figures",
         help="Use local Docling figure crops when the optional dependency is installed.",
     ),
+    successful_fibres_only: bool = typer.Option(
+        False,
+        "--successful-fibres-only",
+        help="Emit only formulations with explicit formed-fibre evidence.",
+    ),
+    screen_reviews: bool = typer.Option(
+        True,
+        "--screen-reviews/--include-reviews",
+        help="Skip articles explicitly labelled as reviews before vision extraction.",
+    ),
 ):
     """Run the extraction pipeline over a directory of PDFs."""
     results = run_pipeline(
@@ -34,6 +44,8 @@ def run(
         text_only=text_only,
         resume=resume,
         use_docling_figures=docling_figures,
+        successful_fibres_only=successful_fibres_only,
+        screen_reviews=screen_reviews,
     )
     typer.echo(f"Wrote {len(results)} extracted rows to {out}")
 
@@ -63,6 +75,16 @@ def resume(
         "--docling-figures/--no-docling-figures",
         help="Use local Docling figure crops when the optional dependency is installed.",
     ),
+    successful_fibres_only: bool = typer.Option(
+        False,
+        "--successful-fibres-only",
+        help="Emit only formulations with explicit formed-fibre evidence.",
+    ),
+    screen_reviews: bool = typer.Option(
+        True,
+        "--screen-reviews/--include-reviews",
+        help="Skip articles explicitly labelled as reviews before vision extraction.",
+    ),
 ):
     """Resume incomplete papers recorded in a run manifest."""
     results = resume_pipeline(
@@ -70,6 +92,8 @@ def resume(
         model=model,
         text_only=text_only,
         use_docling_figures=docling_figures,
+        successful_fibres_only=successful_fibres_only,
+        screen_reviews=screen_reviews,
     )
     typer.echo(f"Resumed run with {len(results)} extracted rows in {run_dir}")
 
