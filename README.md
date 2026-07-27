@@ -45,6 +45,8 @@ python3 -m pip install -e '.[raster]'
 Use `--text-only` to skip chart images, or `--resume` to reuse a completed paper only when its source hash is unchanged.
 Set `OPENROUTER_MAX_TOKENS` to change the per-page extraction response budget; it defaults to `3000` to keep first-pass runs bounded. If a response is malformed or cut off, the JSON-only retry automatically uses at least `6000` tokens; set `OPENROUTER_FALLBACK_MAX_TOKENS` to change that retry budget.
 
+The default primary model is `google/gemini-3.6-flash`. Set `OPENROUTER_FALLBACK_MODEL` to choose the model used after a transport or provider failure; it defaults to `openai/gpt-4o`. `OPENROUTER_READ_TIMEOUT_SECONDS` defaults to `180`, preventing a stalled provider route from blocking a paper indefinitely while avoiding a short foreground timeout.
+
 ```bash
 python3 -m rheology_paper_ocr.cli inspect /path/to/paper.pdf --out outputs/inspect-paper
 python3 -m rheology_paper_ocr.cli report outputs/run-001

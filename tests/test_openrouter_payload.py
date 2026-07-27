@@ -493,6 +493,43 @@ def test_client_retries_transient_read_timeout(monkeypatch):
     assert len(attempts) == 2
 
 
+def test_client_fails_over_to_configured_model_after_primary_timeouts(monkeypatch, tmp_path: Path):
+    models = []
+
+    class FakeResponse:
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"paper_id":"paper_0001","source_pdf":"paper.pdf","has_rheology_chart":false,"findings":[]}'
+                        }
+                    }
+                ]
+            }
+
+        def raise_for_status(self):
+            return None
+
+    def fake_post(*args, **kwargs):
+        model = kwargs["json"]["model"]
+        models.append(model)
+        if model == "primary-model":
+            raise httpx.ReadTimeout("primary stalled")
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    client = OpenRouterClient(api_key="test-key", model="primary-model", fallback_model="fallback-model")
+
+    result = client.extract("Extract.", [], raw_response_path=tmp_path / "raw.json")
+
+    assert result["findings"] == []
+    assert models == ["primary-model", "primary-model", "fallback-model"]
+    assert client.last_model_used == "fallback-model"
+    assert client.last_attempts[-1] == {"model": "fallback-model", "status": "succeeded"}
+    assert (tmp_path / "raw_fallback.json").exists()
+
+
 def test_prompt_includes_relevant_late_rheology_context():
     text = "Intro only.\n" + ("background filler\n" * 700) + (
         "Fig. 2 shows viscosity as a function of shear rate for electrospinning solutions. "

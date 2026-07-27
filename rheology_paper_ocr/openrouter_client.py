@@ -61,24 +61,65 @@ def parse_json_response(content: str) -> dict[str, Any]:
 
 
 class OpenRouterClient:
-    def __init__(self, api_key: str | None = None, base_url: str | None = None, model: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+        fallback_model: str | None = None,
+    ):
         self.api_key = api_key or os.environ["OPENROUTER_API_KEY"]
         self.base_url = (base_url or os.environ.get("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1").rstrip("/")
-        self.model = model or os.environ.get("OPENROUTER_MODEL") or "anthropic/claude-sonnet-4.6"
+        self.model = model or os.environ.get("OPENROUTER_MODEL") or "google/gemini-3.6-flash"
+        self.fallback_model = fallback_model or os.environ.get("OPENROUTER_FALLBACK_MODEL") or "openai/gpt-4o"
+        self.read_timeout_seconds = float(os.environ.get("OPENROUTER_READ_TIMEOUT_SECONDS", "180"))
         self.max_tokens = int(os.environ.get("OPENROUTER_MAX_TOKENS", "3000"))
         self.fallback_max_tokens = max(
             self.max_tokens,
             int(os.environ.get("OPENROUTER_FALLBACK_MAX_TOKENS", "6000")),
         )
+        self.last_model_used: str | None = None
+        self.last_attempts: list[dict[str, str]] = []
 
     def extract(self, prompt: str, image_paths: list[Path], raw_response_path: Path | None = None) -> dict[str, Any]:
-        payload = build_chat_payload(self.model, prompt, image_paths, use_schema=True, max_tokens=self.max_tokens)
+        self.last_model_used = None
+        self.last_attempts = []
+        try:
+            result = self._extract_with_model(self.model, prompt, image_paths, raw_response_path)
+            self.last_model_used = self.model
+            self.last_attempts.append({"model": self.model, "status": "succeeded"})
+            return result
+        except (httpx.HTTPError, RuntimeError, json.JSONDecodeError) as primary_error:
+            self.last_attempts.append({"model": self.model, "status": f"failed: {primary_error}"})
+            if not self.fallback_model or self.fallback_model == self.model:
+                raise
+            fallback_path = _fallback_response_path(raw_response_path)
+            try:
+                result = self._extract_with_model(self.fallback_model, prompt, image_paths, fallback_path)
+                self.last_model_used = self.fallback_model
+                self.last_attempts.append({"model": self.fallback_model, "status": "succeeded"})
+                return result
+            except (httpx.HTTPError, RuntimeError, json.JSONDecodeError) as fallback_error:
+                self.last_attempts.append({"model": self.fallback_model, "status": f"failed: {fallback_error}"})
+                raise RuntimeError(
+                    f"OpenRouter primary model {self.model} failed ({primary_error}); "
+                    f"fallback model {self.fallback_model} failed ({fallback_error})"
+                ) from fallback_error
+
+    def _extract_with_model(
+        self,
+        model: str,
+        prompt: str,
+        image_paths: list[Path],
+        raw_response_path: Path | None,
+    ) -> dict[str, Any]:
+        payload = build_chat_payload(model, prompt, image_paths, use_schema=True, max_tokens=self.max_tokens)
         response = self._post_chat_with_retries(payload)
         data = response.json()
         if "choices" not in data and _is_schema_rejection(data):
             if raw_response_path:
                 _write_json(raw_response_path.with_name(f"{raw_response_path.stem}_schema_rejected.json"), data)
-            payload = build_chat_payload(self.model, prompt, image_paths, use_schema=False, max_tokens=self.max_tokens)
+            payload = build_chat_payload(model, prompt, image_paths, use_schema=False, max_tokens=self.max_tokens)
             response = self._post_chat_with_retries(payload)
             data = response.json()
         if raw_response_path:
@@ -97,7 +138,7 @@ class OpenRouterClient:
             # before they emit complete JSON. Preserve schema mode for the
             # larger retry: it constrains the answer far better than loose JSON.
             schema_retry_payload = build_chat_payload(
-                self.model,
+                model,
                 prompt,
                 image_paths,
                 use_schema=True,
@@ -117,7 +158,7 @@ class OpenRouterClient:
                 if raw_response_path:
                     _write_json(raw_response_path.with_name(f"{raw_response_path.stem}_schema_retry_malformed.json"), schema_retry_data)
                 fallback_payload = build_chat_payload(
-                    self.model,
+                    model,
                     prompt,
                     image_paths,
                     use_schema=False,
@@ -143,7 +184,12 @@ class OpenRouterClient:
                 "X-Title": "rheology-paper-ocr",
             },
             json=payload,
-            timeout=httpx.Timeout(connect=30.0, read=None, write=60.0, pool=30.0),
+            timeout=httpx.Timeout(
+                connect=30.0,
+                read=self.read_timeout_seconds,
+                write=60.0,
+                pool=30.0,
+            ),
         )
 
     def _post_chat_with_retries(self, payload: dict[str, Any], attempts: int = 2) -> httpx.Response:
@@ -167,3 +213,9 @@ def _is_schema_rejection(data: dict[str, Any]) -> bool:
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def _fallback_response_path(raw_response_path: Path | None) -> Path | None:
+    if raw_response_path is None:
+        return None
+    return raw_response_path.with_name(f"{raw_response_path.stem}_fallback{raw_response_path.suffix}")

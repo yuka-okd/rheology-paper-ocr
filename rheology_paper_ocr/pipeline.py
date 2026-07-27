@@ -455,6 +455,18 @@ def _run_papers(
                     extraction.model_dump_json(indent=2),
                     encoding="utf-8",
                 )
+                (llm_dir / f"{page_suffix}_model_route.json").write_text(
+                    json.dumps(
+                        {
+                            "primary_model": getattr(client, "model", model),
+                            "fallback_model": getattr(client, "fallback_model", None),
+                            "model_used": getattr(client, "last_model_used", model),
+                            "attempts": getattr(client, "last_attempts", []),
+                        },
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
                 extractions.append(extraction)
 
             all_paper_results, paper_reviews = apply_decision_policy(_finding_results(extractions, paper))
