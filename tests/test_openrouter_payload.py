@@ -175,6 +175,18 @@ def test_target_figure_prompt_limits_a_crop_pass_to_the_localized_figure():
     assert "Extract only this figure" in prompt
 
 
+def test_prompt_includes_deterministic_chart_geometry():
+    prompt = build_extraction_prompt(
+        "paper_0003",
+        "paper.pdf",
+        "Figure 2 is a viscosity plot.",
+        chart_geometry={"plot_bbox": (10, 20, 100, 200), "has_plot_frame": True},
+    )
+
+    assert "Deterministic chart geometry" in prompt
+    assert "plot_bbox" in prompt
+
+
 def test_successful_fibres_only_prompt_omits_non_successful_series():
     prompt = build_extraction_prompt(
         "paper_0003",

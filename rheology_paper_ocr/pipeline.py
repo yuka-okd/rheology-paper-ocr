@@ -7,6 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from rheology_paper_ocr.extract_with_llm import extract_paper_with_llm
+from rheology_paper_ocr.chart_geometry import analyze_chart_geometry
 from rheology_paper_ocr.docling_figures import (
     DoclingFigureError,
     LocalizedFigure,
@@ -426,6 +427,15 @@ def _run_papers(
                     chart_crop_path = _relative_to_run(target_figure.crop_path, out_dir)
                     if target_figure.native_graphic_path and target_figure.native_graphic_path != target_figure.crop_path:
                         attached_images.append(target_figure.native_graphic_path)
+                chart_geometry = None
+                if target_figure is not None:
+                    try:
+                        chart_geometry = analyze_chart_geometry(target_figure.crop_path).to_dict()
+                        geometry_dir = paper_dir / "chart_geometry"
+                        geometry_dir.mkdir(exist_ok=True)
+                        (geometry_dir / f"{page_suffix}.json").write_text(json.dumps(chart_geometry, indent=2), encoding="utf-8")
+                    except Exception:
+                        pass
                 extraction = extract_paper_with_llm(
                     client,
                     paper.paper_id,
@@ -439,6 +449,7 @@ def _run_papers(
                     target_figure_id=None if target_figure is None else target_figure.figure_id,
                     target_figure_caption=None if target_figure is None else target_figure.caption,
                     successful_fibres_only=successful_fibres_only,
+                    chart_geometry=chart_geometry,
                 )
                 (llm_dir / f"{page_suffix}_extraction.json").write_text(
                     extraction.model_dump_json(indent=2),

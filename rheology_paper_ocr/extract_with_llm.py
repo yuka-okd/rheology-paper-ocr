@@ -70,6 +70,7 @@ def build_extraction_prompt(
     target_figure_id: str | None = None,
     target_figure_caption: str | None = None,
     successful_fibres_only: bool = False,
+    chart_geometry: dict[str, Any] | None = None,
 ) -> str:
     clipped_text = select_prompt_context(text)
     mode_instruction = (
@@ -101,6 +102,7 @@ Attached page: {attached_page if attached_page is not None else "none (text-only
 sample definitions, formulation aliases, and fibre outcome evidence.
 {target_instruction}
 {success_filter_instruction}
+{f"Deterministic chart geometry: {chart_geometry}" if chart_geometry else ""}
 
 Return ONLY valid JSON matching the provided schema.
 
@@ -139,6 +141,7 @@ def extract_paper_with_llm(
     target_figure_id: str | None = None,
     target_figure_caption: str | None = None,
     successful_fibres_only: bool = False,
+    chart_geometry: dict[str, Any] | None = None,
 ) -> PaperLLMExtraction:
     prompt = build_extraction_prompt(
         paper_id,
@@ -149,6 +152,7 @@ def extract_paper_with_llm(
         target_figure_id=target_figure_id,
         target_figure_caption=target_figure_caption,
         successful_fibres_only=successful_fibres_only,
+        chart_geometry=chart_geometry,
     )
     raw = client.extract(prompt, image_paths, raw_response_path=raw_response_path)
     normalized = normalize_extraction_payload(

@@ -36,6 +36,12 @@ and fibre-size figures.
 python3 -m pip install -e '.[docling]'
 ```
 
+For deterministic raster chart-frame detection, install the optional image-processing dependencies:
+
+```bash
+python3 -m pip install -e '.[raster]'
+```
+
 Use `--text-only` to skip chart images, or `--resume` to reuse a completed paper only when its source hash is unchanged.
 Set `OPENROUTER_MAX_TOKENS` to change the per-page extraction response budget; it defaults to `3000` to keep first-pass runs bounded.
 
@@ -61,6 +67,7 @@ outputs/run-001/
     figures/             # Docling-localized chart crops when available
     native_graphics/     # high-resolution embedded chart assets when available
     native_graphics.json # PDF vector/raster inventory for candidate pages
+    chart_geometry/      # optional deterministic plot-frame measurements
     docling_figures.json # figure bounding boxes and recovered captions
     llm/
     results.json
