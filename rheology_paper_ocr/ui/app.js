@@ -78,7 +78,9 @@ async function saveDecision(decision) {
 }
 
 async function createRun(event) {
-  event.preventDefault(); const files = $('#pdf-files').files; const error = $('#upload-error'); error.classList.add('hidden');
+  event.preventDefault();
+  if (event.submitter?.value === 'cancel') { $('#upload-dialog').close(); return; }
+  const files = $('#pdf-files').files; const error = $('#upload-error'); error.classList.add('hidden');
   if (!files.length) { error.textContent = 'Choose at least one PDF.'; error.classList.remove('hidden'); return; }
   const apiKey = $('#openrouter-key').value.trim();
   if ($('#remember-key').checked && apiKey) localStorage.setItem(apiKeyStorageKey, apiKey); else localStorage.removeItem(apiKeyStorageKey);
