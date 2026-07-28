@@ -278,6 +278,7 @@ def run_pipeline(
     out_dir: Path,
     max_papers: int | None = None,
     model: str | None = None,
+    api_key: str | None = None,
     text_only: bool = False,
     resume: bool = False,
     use_docling_figures: bool = True,
@@ -291,6 +292,7 @@ def run_pipeline(
         papers,
         out_dir=out_dir,
         model=model,
+        api_key=api_key,
         text_only=text_only,
         resume=resume,
         use_docling_figures=use_docling_figures,
@@ -319,6 +321,7 @@ def resume_pipeline(
         papers,
         out_dir=out_dir,
         model=model,
+        api_key=None,
         text_only=text_only,
         resume=True,
         use_docling_figures=use_docling_figures,
@@ -331,6 +334,7 @@ def _run_papers(
     papers: list[SourcePaper],
     out_dir: Path,
     model: str | None,
+    api_key: str | None,
     text_only: bool,
     resume: bool,
     use_docling_figures: bool,
@@ -349,7 +353,10 @@ def _run_papers(
         _write_manifest(out_dir, [])
         write_reports(out_dir, [], [])
         return []
-    client = OpenRouterClient(model=model)
+    client_args = {"model": model}
+    if api_key:
+        client_args["api_key"] = api_key
+    client = OpenRouterClient(**client_args)
     manifest: list[dict] = []
 
     for paper in papers:

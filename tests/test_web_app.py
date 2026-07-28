@@ -1,10 +1,11 @@
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from rheology_paper_ocr import web_app
-from rheology_paper_ocr.web_app import create_app
+from rheology_paper_ocr.web_app import create_app, serve_local_app
 from rheology_paper_ocr.web_store import LocalRunStore
 
 
@@ -74,8 +75,8 @@ def test_existing_browser_run_resumes_completed_papers(tmp_path: Path, monkeypat
     (output_dir / "manifest.json").write_text("[]", encoding="utf-8")
     seen = {}
 
-    def fake_pipeline(input_dir, pipeline_output_dir, resume=False):
-        seen.update(input_dir=input_dir, output_dir=pipeline_output_dir, resume=resume)
+    def fake_pipeline(input_dir, pipeline_output_dir, api_key=None, resume=False):
+        seen.update(input_dir=input_dir, output_dir=pipeline_output_dir, api_key=api_key, resume=resume)
         return []
 
     monkeypatch.setattr(web_app, "run_pipeline", fake_pipeline)
@@ -83,3 +84,37 @@ def test_existing_browser_run_resumes_completed_papers(tmp_path: Path, monkeypat
 
     assert seen["resume"] is True
     assert store.get_run(run["id"])["status"] == "completed"
+
+
+def test_browser_api_key_is_passed_only_to_the_in_memory_job(tmp_path: Path, monkeypatch):
+    client = TestClient(create_app(tmp_path))
+    created = client.post(
+        "/api/runs",
+        files=[("files", ("paper.pdf", b"%PDF-1.4\n", "application/pdf"))],
+    )
+    seen = {}
+
+    def fake_job(store, run_id, api_key):
+        seen.update(run_id=run_id, api_key=api_key)
+
+    class ImmediateThread:
+        def __init__(self, *, target, args, daemon):
+            self.target = target
+            self.args = args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(web_app, "_run_job", fake_job)
+    monkeypatch.setattr(web_app.threading, "Thread", ImmediateThread)
+    key = "browser-only-test-key"
+    started = client.post(f"/api/runs/{created.json()['run']['id']}/start", json={"api_key": key})
+
+    assert started.status_code == 200
+    assert seen["api_key"] == key
+    assert key.encode() not in (tmp_path / "sessions.sqlite3").read_bytes()
+
+
+def test_browser_server_rejects_non_loopback_host(tmp_path: Path):
+    with pytest.raises(ValueError, match="loopback"):
+        serve_local_app(tmp_path, "0.0.0.0", 8787, open_browser=False)

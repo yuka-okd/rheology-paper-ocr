@@ -32,7 +32,11 @@ def create_app(data_dir: Path):
         decision: str
         note: str | None = None
 
+    class StartRunRequest(BaseModel):
+        api_key: str | None = None
+
     globals()["DecisionRequest"] = DecisionRequest
+    globals()["StartRunRequest"] = StartRunRequest
 
     store = LocalRunStore(data_dir)
     ui_dir = Path(__file__).with_name("ui")
@@ -66,7 +70,7 @@ def create_app(data_dir: Path):
         return {"run": _run_summary(store.get_run(run["id"])), "files": saved}
 
     @app.post("/api/runs/{run_id}/start")
-    def start_run(run_id: str):
+    def start_run(run_id: str, request: StartRunRequest):
         try:
             run = store.get_run(run_id)
         except KeyError:
@@ -76,7 +80,8 @@ def create_app(data_dir: Path):
         if not list(Path(run["input_dir"]).glob("*.pdf")):
             raise HTTPException(status_code=400, detail="No PDF inputs are available for this run.")
         store.update_status(run_id, "running")
-        thread = threading.Thread(target=_run_job, args=(store, run_id), daemon=True)
+        api_key = request.api_key.strip() if request.api_key else None
+        thread = threading.Thread(target=_run_job, args=(store, run_id, api_key), daemon=True)
         thread.start()
         return _run_summary(store.get_run(run_id))
 
@@ -150,16 +155,23 @@ def serve_local_app(data_dir: Path, host: str, port: int, open_browser: bool) ->
         import uvicorn
     except ImportError as exc:
         raise RuntimeError("The local browser app requires '.[web]'. Install with: python -m pip install -e '.[web]'.") from exc
+    if host not in {"127.0.0.1", "::1", "localhost"}:
+        raise ValueError("The browser app only supports a loopback host so uploaded papers and API keys remain local.")
     if open_browser:
         threading.Timer(0.8, lambda: webbrowser.open(f"http://{host}:{port}")).start()
     uvicorn.run(create_app(data_dir), host=host, port=port, log_level="info")
 
 
-def _run_job(store: LocalRunStore, run_id: str) -> None:
+def _run_job(store: LocalRunStore, run_id: str, api_key: str | None = None) -> None:
     run = store.get_run(run_id)
     try:
         output_dir = Path(run["output_dir"])
-        run_pipeline(Path(run["input_dir"]), output_dir, resume=(output_dir / "manifest.json").exists())
+        run_pipeline(
+            Path(run["input_dir"]),
+            output_dir,
+            api_key=api_key,
+            resume=(output_dir / "manifest.json").exists(),
+        )
         manifest = read_json(output_dir / "manifest.json", [])
         if any(item.get("status") == "blocked_insufficient_credits" for item in manifest):
             store.update_status(run_id, "blocked", "OpenRouter credit is exhausted.")

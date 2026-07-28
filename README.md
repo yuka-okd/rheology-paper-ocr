@@ -27,7 +27,6 @@ macOS and Linux:
 
 ```bash
 python3 -m pip install -e '.[web]'
-export OPENROUTER_API_KEY="..."
 python3 -m rheology_paper_ocr.cli serve
 ```
 
@@ -35,14 +34,20 @@ Windows PowerShell:
 
 ```powershell
 py -m pip install -e ".[web]"
-$env:OPENROUTER_API_KEY = "..."
 py -m rheology_paper_ocr.cli serve
 ```
 
 The browser opens at `http://127.0.0.1:8787`. Use `--no-open` to suppress the
 automatic browser launch, `--port 8790` to select another port, or `--data-dir
 path/to/folder` to place local sessions somewhere specific. The default data
-directory is `.rheology-paper-ocr` in the current user's home directory.
+directory is `.rheology-paper-ocr` in the current user's home directory. Enter
+the OpenRouter key in the upload dialog. It is supplied only to that run in
+memory. Selecting **Remember on this device** stores it in that browser's local
+storage; use this only in a trusted personal browser profile. Leaving the box
+unchecked removes any previously saved browser key after the next submission.
+Setting `OPENROUTER_API_KEY` before launching remains supported for unattended
+batch runs or when no browser key is supplied. The service rejects non-loopback
+host bindings so papers and browser-supplied keys cannot be exposed on a LAN.
 
 ## Batch CLI
 

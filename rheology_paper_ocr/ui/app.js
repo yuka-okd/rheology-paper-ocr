@@ -1,5 +1,6 @@
 const state = { runs: [], detail: null, selectedRunId: null, filter: 'all', selectedRow: null, poll: null };
 const $ = (selector) => document.querySelector(selector);
+const apiKeyStorageKey = 'rheology-evidence.openrouter-api-key';
 
 async function api(path, options = {}) {
   const response = await fetch(path, options);
@@ -79,15 +80,18 @@ async function saveDecision(decision) {
 async function createRun(event) {
   event.preventDefault(); const files = $('#pdf-files').files; const error = $('#upload-error'); error.classList.add('hidden');
   if (!files.length) { error.textContent = 'Choose at least one PDF.'; error.classList.remove('hidden'); return; }
+  const apiKey = $('#openrouter-key').value.trim();
+  if ($('#remember-key').checked && apiKey) localStorage.setItem(apiKeyStorageKey, apiKey); else localStorage.removeItem(apiKeyStorageKey);
   const form = new FormData(); form.append('name', $('#run-name').value); [...files].forEach(file => form.append('files', file));
   $('#start-upload').disabled = true; $('#start-upload').textContent = 'Uploading…';
-  try { const created = await api('/api/runs', {method:'POST', body:form}); await api(`/api/runs/${created.run.id}/start`, {method:'POST'}); $('#upload-dialog').close(); await loadRuns(); await selectRun(created.run.id); }
+  try { const created = await api('/api/runs', {method:'POST', body:form}); await api(`/api/runs/${created.run.id}/start`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({api_key:apiKey || null})}); $('#upload-dialog').close(); await loadRuns(); await selectRun(created.run.id); }
   catch (err) { error.textContent = err.message; error.classList.remove('hidden'); }
   finally { $('#start-upload').disabled = false; $('#start-upload').textContent = 'Start extraction'; }
 }
 
 $('#new-run').addEventListener('click', () => $('#upload-dialog').showModal()); document.querySelector('[data-open-upload]').addEventListener('click', () => $('#upload-dialog').showModal());
 $('#upload-form').addEventListener('submit', createRun); $('#pdf-files').addEventListener('change', event => { const count = event.target.files.length; $('#file-count').textContent = count ? `${count} PDF${count === 1 ? '' : 's'} selected` : 'No files selected'; });
+const savedApiKey = localStorage.getItem(apiKeyStorageKey); if (savedApiKey) { $('#openrouter-key').value = savedApiKey; $('#remember-key').checked = true; }
 $('#close-review').addEventListener('click', () => $('#review-panel').classList.add('hidden')); document.querySelectorAll('[data-decision]').forEach(button => button.addEventListener('click', () => saveDecision(button.dataset.decision)));
 document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => { document.querySelectorAll('.tab').forEach(item => item.classList.remove('active')); tab.classList.add('active'); state.filter = tab.dataset.filter; renderTable(); }));
 loadRuns().catch(error => { console.error(error); $('#run-subtitle').textContent = error.message; });

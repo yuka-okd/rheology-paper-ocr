@@ -69,7 +69,7 @@ def report(run_dir: Path):
 @app.command()
 def serve(
     data_dir: Path = typer.Option(Path.home() / ".rheology-paper-ocr", "--data-dir", help="Local sessions, uploaded PDFs, and run artifacts."),
-    host: str = typer.Option("127.0.0.1", "--host", help="Bind address. Use the default for local-only access."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Loopback bind address for local-only access."),
     port: int = typer.Option(8787, "--port", min=1, max=65535, help="Local browser port."),
     open_browser: bool = typer.Option(True, "--open/--no-open", help="Open the local browser application automatically."),
 ):
