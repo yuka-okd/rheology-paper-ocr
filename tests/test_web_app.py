@@ -25,6 +25,7 @@ def test_browser_api_uploads_papers_persists_decisions_and_exports_csv(tmp_path:
     client = TestClient(create_app(tmp_path))
 
     home = client.get("/")
+    stylesheet = client.get("/static/app.css")
     created = client.post(
         "/api/runs",
         data={"name": "Browser test"},
@@ -33,6 +34,8 @@ def test_browser_api_uploads_papers_persists_decisions_and_exports_csv(tmp_path:
 
     assert home.status_code == 200
     assert "Rheology Evidence" in home.text
+    assert stylesheet.status_code == 200
+    assert "--signal" in stylesheet.text
     assert created.status_code == 200
     run = created.json()["run"]
     output_dir = Path(LocalRunStore(tmp_path).get_run(run["id"])["output_dir"])

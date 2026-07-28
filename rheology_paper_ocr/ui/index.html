@@ -9,15 +9,15 @@
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand"><span class="brand-mark">R</span><span>Rheology Evidence</span></div>
+      <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>Rheology<br>Evidence</span></div>
       <button id="new-run" class="primary wide">New extraction</button>
       <div class="sidebar-label">Runs</div>
       <nav id="run-list" class="run-list" aria-label="Extraction runs"></nav>
-      <div class="local-note">Local workspace</div>
+      <div class="local-note"><span></span>Local workspace</div>
     </aside>
     <main class="workspace">
       <header class="topbar">
-        <div><div id="run-title" class="run-title">Extraction runs</div><div id="run-subtitle" class="run-subtitle">Choose a run or start a new extraction</div></div>
+        <div><div class="eyebrow top-eyebrow">Evidence ledger</div><div id="run-title" class="run-title">Extraction runs</div><div id="run-subtitle" class="run-subtitle">Choose a run or start a new extraction</div></div>
         <div id="actions" class="actions hidden">
           <a id="csv-export" class="icon-button" title="Export CSV" download>CSV</a>
           <a id="print-export" class="icon-button" title="Print or save as PDF" target="_blank">PDF</a>
