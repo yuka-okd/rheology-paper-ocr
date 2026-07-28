@@ -6,6 +6,7 @@ import typer
 
 from rheology_paper_ocr.pipeline import load_saved_results, resume_pipeline, run_pipeline
 from rheology_paper_ocr.report import write_reports
+from rheology_paper_ocr.web_app import serve_local_app
 
 
 app = typer.Typer(help="Extract rheology chart and fibre outcome evidence from PDFs.")
@@ -63,6 +64,17 @@ def report(run_dir: Path):
     results = load_saved_results(run_dir)
     write_reports(run_dir, results)
     typer.echo(f"Regenerated reports for {len(results)} extracted rows in {run_dir}")
+
+
+@app.command()
+def serve(
+    data_dir: Path = typer.Option(Path.home() / ".rheology-paper-ocr", "--data-dir", help="Local sessions, uploaded PDFs, and run artifacts."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address. Use the default for local-only access."),
+    port: int = typer.Option(8787, "--port", min=1, max=65535, help="Local browser port."),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open the local browser application automatically."),
+):
+    """Launch the local browser workflow for upload, review, and export."""
+    serve_local_app(data_dir=data_dir, host=host, port=port, open_browser=open_browser)
 
 
 @app.command()

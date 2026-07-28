@@ -1,6 +1,6 @@
 # rheology-paper-ocr
 
-An evidence-first CLI for connecting rheology chart series in chemistry papers to the represented formulation and its reported fibre outcome.
+An evidence-first local browser application for connecting rheology chart series in chemistry papers to the represented formulation and its reported fibre outcome.
 
 This is an evidence-first automation workflow. It extracts sparse points to classify broad rheology behaviour; it does not claim publication-grade curve reconstruction.
 
@@ -16,7 +16,35 @@ Each row represents one chart series and preserves:
 
 Rows without enough curve evidence, an explicit sample link, or fibre evidence remain `unclear` or carry a warning. The tool must not infer fibre formation from microscopy images. Every row is also assigned `accepted` or `needs_review`; relevant charts without a supported row are preserved in the review queue.
 
-## Run
+## Local Browser App
+
+Install the browser dependencies and start the local-only service. It opens a
+workspace where PDFs can be uploaded, runs can be reviewed later, evidence can
+be adjudicated, and CSV or printable PDF reports can be exported. Uploaded
+papers and outputs stay on the computer in the selected data directory.
+
+macOS and Linux:
+
+```bash
+python3 -m pip install -e '.[web]'
+export OPENROUTER_API_KEY="..."
+python3 -m rheology_paper_ocr.cli serve
+```
+
+Windows PowerShell:
+
+```powershell
+py -m pip install -e ".[web]"
+$env:OPENROUTER_API_KEY = "..."
+py -m rheology_paper_ocr.cli serve
+```
+
+The browser opens at `http://127.0.0.1:8787`. Use `--no-open` to suppress the
+automatic browser launch, `--port 8790` to select another port, or `--data-dir
+path/to/folder` to place local sessions somewhere specific. The default data
+directory is `.rheology-paper-ocr` in the current user's home directory.
+
+## Batch CLI
 
 ```bash
 python3 -m pip install -e .

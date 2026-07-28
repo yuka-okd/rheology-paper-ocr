@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rheology Evidence</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">R</span><span>Rheology Evidence</span></div>
+      <button id="new-run" class="primary wide">New extraction</button>
+      <div class="sidebar-label">Runs</div>
+      <nav id="run-list" class="run-list" aria-label="Extraction runs"></nav>
+      <div class="local-note">Local workspace</div>
+    </aside>
+    <main class="workspace">
+      <header class="topbar">
+        <div><div id="run-title" class="run-title">Extraction runs</div><div id="run-subtitle" class="run-subtitle">Choose a run or start a new extraction</div></div>
+        <div id="actions" class="actions hidden">
+          <a id="csv-export" class="icon-button" title="Export CSV" download>CSV</a>
+          <a id="print-export" class="icon-button" title="Print or save as PDF" target="_blank">PDF</a>
+        </div>
+      </header>
+      <section id="empty-state" class="empty-state">
+        <div class="empty-symbol">+</div>
+        <h1>No local extraction runs</h1>
+        <button class="primary" data-open-upload>Upload papers</button>
+      </section>
+      <section id="run-view" class="run-view hidden">
+        <div id="status-banner" class="status-banner"></div>
+        <div id="metrics" class="metrics"></div>
+        <div class="table-toolbar">
+          <div class="tabs" role="tablist">
+            <button class="tab active" data-filter="all">All rows</button>
+            <button class="tab" data-filter="accepted">Accepted</button>
+            <button class="tab" data-filter="needs_review">Needs review</button>
+          </div>
+          <div id="table-count" class="table-count"></div>
+        </div>
+        <div class="table-frame">
+          <table>
+            <thead><tr><th>Paper</th><th>Figure / curve</th><th>Formulation</th><th>Fibre outcome</th><th>Evidence</th><th>Decision</th></tr></thead>
+            <tbody id="result-table"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <aside id="review-panel" class="review-panel hidden" aria-live="polite">
+      <div class="review-header"><div><div class="eyebrow">Review record</div><h2 id="review-title"></h2></div><button id="close-review" class="close" title="Close review">×</button></div>
+      <div id="review-chart" class="chart-frame"></div>
+      <dl id="review-details" class="details"></dl>
+      <section class="evidence"><div class="eyebrow">Fibre evidence</div><p id="review-evidence"></p></section>
+      <section class="evidence"><div class="eyebrow">Warnings</div><ul id="review-warnings"></ul></section>
+      <label class="field-label" for="review-note">Reviewer note</label>
+      <textarea id="review-note" rows="3" placeholder="Optional audit note"></textarea>
+      <div class="decision-actions">
+        <button class="secondary" data-decision="needs_review">Hold</button>
+        <button class="danger" data-decision="rejected">Reject</button>
+        <button class="primary" data-decision="accepted">Accept</button>
+      </div>
+    </aside>
+  </div>
+  <dialog id="upload-dialog">
+    <form id="upload-form" method="dialog">
+      <div class="dialog-header"><div><div class="eyebrow">Local extraction</div><h2>Upload papers</h2></div><button value="cancel" class="close" title="Close">×</button></div>
+      <label class="field-label" for="run-name">Run name</label>
+      <input id="run-name" name="name" placeholder="July rheology set">
+      <label class="dropzone" for="pdf-files"><span>Choose PDF papers</span><small id="file-count">No files selected</small></label>
+      <input id="pdf-files" name="files" type="file" accept="application/pdf,.pdf" multiple hidden>
+      <div id="upload-error" class="form-error hidden"></div>
+      <button id="start-upload" class="primary wide" value="default">Start extraction</button>
+    </form>
+  </dialog>
+  <script src="/static/app.js"></script>
+</body>
+</html>

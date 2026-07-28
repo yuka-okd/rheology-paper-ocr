@@ -19,9 +19,13 @@ dependencies = [
 [project.optional-dependencies]
 docling = ["docling>=2.115,<3"]
 raster = ["numpy", "opencv-python-headless"]
+web = ["fastapi>=0.115,<1", "uvicorn[standard]>=0.30,<1", "python-multipart>=0.0.9,<1"]
 
 [project.scripts]
 rheology-paper-ocr = "rheology_paper_ocr.cli:main"
 
 [tool.setuptools]
 packages = ["rheology_paper_ocr"]
+
+[tool.setuptools.package-data]
+rheology_paper_ocr = ["ui/*"]
