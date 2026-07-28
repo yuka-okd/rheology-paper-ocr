@@ -81,7 +81,7 @@ async function createRun(event) {
   event.preventDefault();
   if (event.submitter?.value === 'cancel') { $('#upload-dialog').close(); return; }
   const files = $('#pdf-files').files; const error = $('#upload-error'); error.classList.add('hidden');
-  if (!files.length) { error.textContent = 'Choose at least one PDF.'; error.classList.remove('hidden'); return; }
+  if (!files.length) { error.textContent = 'Choose at least one PDF or ZIP archive.'; error.classList.remove('hidden'); return; }
   const apiKey = $('#openrouter-key').value.trim();
   if ($('#remember-key').checked && apiKey) localStorage.setItem(apiKeyStorageKey, apiKey); else localStorage.removeItem(apiKeyStorageKey);
   const form = new FormData(); form.append('name', $('#run-name').value); [...files].forEach(file => form.append('files', file));
@@ -92,7 +92,7 @@ async function createRun(event) {
 }
 
 $('#new-run').addEventListener('click', () => $('#upload-dialog').showModal()); document.querySelector('[data-open-upload]').addEventListener('click', () => $('#upload-dialog').showModal());
-$('#upload-form').addEventListener('submit', createRun); $('#pdf-files').addEventListener('change', event => { const count = event.target.files.length; $('#file-count').textContent = count ? `${count} PDF${count === 1 ? '' : 's'} selected` : 'No files selected'; });
+$('#upload-form').addEventListener('submit', createRun); $('#pdf-files').addEventListener('change', event => { const count = event.target.files.length; $('#file-count').textContent = count ? `${count} file${count === 1 ? '' : 's'} selected` : 'No files selected'; });
 const savedApiKey = localStorage.getItem(apiKeyStorageKey); if (savedApiKey) { $('#openrouter-key').value = savedApiKey; $('#remember-key').checked = true; }
 $('#close-review').addEventListener('click', () => $('#review-panel').classList.add('hidden')); document.querySelectorAll('[data-decision]').forEach(button => button.addEventListener('click', () => saveDecision(button.dataset.decision)));
 document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => { document.querySelectorAll('.tab').forEach(item => item.classList.remove('active')); tab.classList.add('active'); state.filter = tab.dataset.filter; renderTable(); }));

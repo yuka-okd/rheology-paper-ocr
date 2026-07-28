@@ -19,7 +19,7 @@ Rows without enough curve evidence, an explicit sample link, or fibre evidence r
 ## Local Browser App
 
 Install the browser dependencies and start the local-only service. It opens a
-workspace where PDFs can be uploaded, runs can be reviewed later, evidence can
+workspace where PDFs or ZIP archives of PDFs can be uploaded, runs can be reviewed later, evidence can
 be adjudicated, and CSV or printable PDF reports can be exported. Uploaded
 papers and outputs stay on the computer in the selected data directory.
 

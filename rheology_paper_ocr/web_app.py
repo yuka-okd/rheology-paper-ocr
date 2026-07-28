@@ -4,13 +4,19 @@ import csv
 import html
 import io
 import shutil
+import tempfile
 import threading
 import webbrowser
+import zipfile
 from pathlib import Path
 from typing import Any
 
 from rheology_paper_ocr.pipeline import run_pipeline
 from rheology_paper_ocr.web_store import LocalRunStore, read_json
+
+
+MAX_ARCHIVE_PDFS = 1_000
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def create_app(data_dir: Path):
@@ -56,17 +62,16 @@ def create_app(data_dir: Path):
         run = store.create_run(name)
         input_dir = Path(run["input_dir"])
         saved = []
-        for index, upload in enumerate(files, start=1):
+        for upload in files:
             source_name = Path(upload.filename or "paper.pdf").name
-            if Path(source_name).suffix.lower() != ".pdf":
-                continue
-            target = input_dir / f"{index:03d}-{source_name}"
-            with target.open("wb") as handle:
-                shutil.copyfileobj(upload.file, handle)
-            saved.append(target.name)
+            suffix = Path(source_name).suffix.lower()
+            if suffix == ".pdf":
+                saved.append(_save_pdf(upload.file, input_dir, source_name, len(saved) + 1))
+            elif suffix == ".zip":
+                saved.extend(_extract_pdfs_from_zip(upload.file, input_dir, len(saved) + 1))
         if not saved:
             shutil.rmtree(input_dir, ignore_errors=True)
-            raise HTTPException(status_code=400, detail="Upload at least one PDF file.")
+            raise HTTPException(status_code=400, detail="Upload at least one PDF file or ZIP containing PDFs.")
         return {"run": _run_summary(store.get_run(run["id"])), "files": saved}
 
     @app.post("/api/runs/{run_id}/start")
@@ -77,7 +82,7 @@ def create_app(data_dir: Path):
             raise HTTPException(status_code=404, detail="Run not found.")
         if run["status"] == "running":
             raise HTTPException(status_code=409, detail="Run is already in progress.")
-        if not list(Path(run["input_dir"]).glob("*.pdf")):
+        if not _pdf_input_files(Path(run["input_dir"])):
             raise HTTPException(status_code=400, detail="No PDF inputs are available for this run.")
         store.update_status(run_id, "running")
         api_key = request.api_key.strip() if request.api_key else None
@@ -192,7 +197,7 @@ def _run_summary(run: dict) -> dict:
         "completed_at": run["completed_at"],
         "status": run["status"],
         "error": run["error"],
-        "paper_count": len(manifest) or len(list(Path(run["input_dir"]).glob("*.pdf"))),
+        "paper_count": len(manifest) or len(_pdf_input_files(Path(run["input_dir"]))),
         "completed_papers": sum(item.get("status") in {"completed", "completed_no_findings"} for item in manifest),
     }
 
@@ -255,3 +260,43 @@ def _csv_value(value: Any) -> str:
     if isinstance(value, list):
         return "; ".join(str(item) for item in value)
     return "" if value is None else str(value)
+
+
+def _save_pdf(source, input_dir: Path, source_name: str, index: int) -> str:
+    target = input_dir / f"{index:03d}-{Path(source_name).name}"
+    with target.open("wb") as handle:
+        shutil.copyfileobj(source, handle)
+    return target.name
+
+
+def _pdf_input_files(input_dir: Path) -> list[Path]:
+    return [path for path in input_dir.iterdir() if path.is_file() and path.suffix.lower() == ".pdf"]
+
+
+def _extract_pdfs_from_zip(source, input_dir: Path, start_index: int) -> list[str]:
+    try:
+        with tempfile.TemporaryFile() as archive_file:
+            source.seek(0)
+            shutil.copyfileobj(source, archive_file)
+            archive_file.seek(0)
+            with zipfile.ZipFile(archive_file) as archive:
+                members = [
+                    member
+                    for member in archive.infolist()
+                    if not member.is_dir() and Path(member.filename).suffix.lower() == ".pdf"
+                ]
+                total_size = sum(member.file_size for member in members)
+                if not members:
+                    raise ValueError("The ZIP archive does not contain any PDF files.")
+                if len(members) > MAX_ARCHIVE_PDFS:
+                    raise ValueError(f"The ZIP archive contains more than {MAX_ARCHIVE_PDFS} PDF files.")
+                if total_size > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                    raise ValueError("The ZIP archive expands beyond the 2 GB local upload limit.")
+                saved = []
+                for offset, member in enumerate(members):
+                    source_name = Path(member.filename).name or "paper.pdf"
+                    with archive.open(member) as pdf:
+                        saved.append(_save_pdf(pdf, input_dir, source_name, start_index + offset))
+                return saved
+    except (zipfile.BadZipFile, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "The uploaded ZIP archive is invalid.") from exc

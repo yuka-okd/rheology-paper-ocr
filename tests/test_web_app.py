@@ -1,5 +1,7 @@
 import json
+import io
 from pathlib import Path
+import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
@@ -69,6 +71,26 @@ def test_browser_api_uploads_papers_persists_decisions_and_exports_csv(tmp_path:
     assert detail.json()["results"][0]["reviewer_decision"] == "accepted"
     assert "reviewer_decision" in exported.text
     assert "accepted" in exported.text
+
+
+def test_browser_api_extracts_pdfs_from_zip_upload(tmp_path: Path):
+    archive_bytes = io.BytesIO()
+    with zipfile.ZipFile(archive_bytes, "w") as archive:
+        archive.writestr("nested/paper-a.pdf", b"%PDF-1.4\nA")
+        archive.writestr("nested/notes.txt", b"not a paper")
+        archive.writestr("paper-b.PDF", b"%PDF-1.4\nB")
+
+    client = TestClient(create_app(tmp_path))
+    created = client.post(
+        "/api/runs",
+        files=[("files", ("papers.zip", archive_bytes.getvalue(), "application/zip"))],
+    )
+
+    assert created.status_code == 200
+    assert created.json()["files"] == ["001-paper-a.pdf", "002-paper-b.PDF"]
+    assert created.json()["run"]["paper_count"] == 2
+    run = LocalRunStore(tmp_path).get_run(created.json()["run"]["id"])
+    assert len([path for path in Path(run["input_dir"]).iterdir() if path.suffix.lower() == ".pdf"]) == 2
 
 
 def test_existing_browser_run_resumes_completed_papers(tmp_path: Path, monkeypatch):
