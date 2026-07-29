@@ -11,6 +11,7 @@ async function api(path, options = {}) {
 function escape(value) { const div = document.createElement('div'); div.textContent = value ?? ''; return div.innerHTML; }
 function effectiveDecision(row) { return row.reviewer_decision || row.decision || 'needs_review'; }
 function badge(decision) { return `<span class="badge ${escape(decision)}">${escape(decision.replace('_', ' '))}</span>`; }
+function updateFileCount(files) { const count = files.length; $('#file-count').textContent = count ? `${count} file${count === 1 ? '' : 's'} selected` : 'No files selected'; }
 
 async function loadRuns() {
   state.runs = await api('/api/runs');
@@ -92,7 +93,11 @@ async function createRun(event) {
 }
 
 $('#new-run').addEventListener('click', () => $('#upload-dialog').showModal()); document.querySelector('[data-open-upload]').addEventListener('click', () => $('#upload-dialog').showModal());
-$('#upload-form').addEventListener('submit', createRun); $('#pdf-files').addEventListener('change', event => { const count = event.target.files.length; $('#file-count').textContent = count ? `${count} file${count === 1 ? '' : 's'} selected` : 'No files selected'; });
+$('#upload-form').addEventListener('submit', createRun); $('#pdf-files').addEventListener('change', event => updateFileCount(event.target.files));
+const dropzone = $('.dropzone');
+['dragenter', 'dragover'].forEach(type => dropzone.addEventListener(type, event => { event.preventDefault(); dropzone.classList.add('dragging'); }));
+['dragleave', 'drop'].forEach(type => dropzone.addEventListener(type, event => { event.preventDefault(); dropzone.classList.remove('dragging'); }));
+dropzone.addEventListener('drop', event => { if (!event.dataTransfer?.files.length) return; $('#pdf-files').files = event.dataTransfer.files; updateFileCount(event.dataTransfer.files); });
 const savedApiKey = localStorage.getItem(apiKeyStorageKey); if (savedApiKey) { $('#openrouter-key').value = savedApiKey; $('#remember-key').checked = true; }
 $('#close-review').addEventListener('click', () => $('#review-panel').classList.add('hidden')); document.querySelectorAll('[data-decision]').forEach(button => button.addEventListener('click', () => saveDecision(button.dataset.decision)));
 document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => { document.querySelectorAll('.tab').forEach(item => item.classList.remove('active')); tab.classList.add('active'); state.filter = tab.dataset.filter; renderTable(); }));
