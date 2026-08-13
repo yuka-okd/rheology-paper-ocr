@@ -46,8 +46,9 @@ memory. Selecting **Remember on this device** stores it in that browser's local
 storage; use this only in a trusted personal browser profile. Leaving the box
 unchecked removes any previously saved browser key after the next submission.
 Setting `OPENROUTER_API_KEY` before launching remains supported for unattended
-batch runs or when no browser key is supplied. The service rejects non-loopback
-host bindings so papers and browser-supplied keys cannot be exposed on a LAN.
+batch runs. The browser workflow always requires a key entered in its upload
+dialog. The service rejects non-loopback host bindings so papers and
+browser-supplied keys cannot be exposed on a LAN.
 
 ## Batch CLI
 

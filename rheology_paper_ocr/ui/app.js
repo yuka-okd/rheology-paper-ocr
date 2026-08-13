@@ -84,6 +84,7 @@ async function createRun(event) {
   const files = $('#pdf-files').files; const error = $('#upload-error'); error.classList.add('hidden');
   if (!files.length) { error.textContent = 'Choose at least one PDF or ZIP archive.'; error.classList.remove('hidden'); return; }
   const apiKey = $('#openrouter-key').value.trim();
+  if (!apiKey) { error.textContent = 'Enter an OpenRouter API key to start extraction.'; error.classList.remove('hidden'); $('#openrouter-key').focus(); return; }
   if ($('#remember-key').checked && apiKey) localStorage.setItem(apiKeyStorageKey, apiKey); else localStorage.removeItem(apiKeyStorageKey);
   const form = new FormData(); form.append('name', $('#run-name').value); [...files].forEach(file => form.append('files', file));
   $('#start-upload').disabled = true; $('#start-upload').textContent = 'Uploading…';

@@ -140,6 +140,21 @@ def test_browser_api_key_is_passed_only_to_the_in_memory_job(tmp_path: Path, mon
     assert key.encode() not in (tmp_path / "sessions.sqlite3").read_bytes()
 
 
+def test_browser_run_requires_an_explicit_api_key(tmp_path: Path):
+    client = TestClient(create_app(tmp_path))
+    created = client.post(
+        "/api/runs",
+        files=[("files", ("paper.pdf", b"%PDF-1.4\n", "application/pdf"))],
+    )
+    run_id = created.json()["run"]["id"]
+
+    started = client.post(f"/api/runs/{run_id}/start", json={})
+
+    assert started.status_code == 400
+    assert "OpenRouter API key" in started.json()["detail"]
+    assert LocalRunStore(tmp_path).get_run(run_id)["status"] == "ready"
+
+
 def test_browser_server_rejects_non_loopback_host(tmp_path: Path):
     with pytest.raises(ValueError, match="loopback"):
         serve_local_app(tmp_path, "0.0.0.0", 8787, open_browser=False)

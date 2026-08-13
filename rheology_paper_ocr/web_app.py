@@ -84,8 +84,10 @@ def create_app(data_dir: Path):
             raise HTTPException(status_code=409, detail="Run is already in progress.")
         if not _pdf_input_files(Path(run["input_dir"])):
             raise HTTPException(status_code=400, detail="No PDF inputs are available for this run.")
-        store.update_status(run_id, "running")
         api_key = request.api_key.strip() if request.api_key else None
+        if not api_key:
+            raise HTTPException(status_code=400, detail="Enter an OpenRouter API key before starting extraction.")
+        store.update_status(run_id, "running")
         thread = threading.Thread(target=_run_job, args=(store, run_id, api_key), daemon=True)
         thread.start()
         return _run_summary(store.get_run(run_id))
