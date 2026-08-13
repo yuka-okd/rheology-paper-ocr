@@ -76,6 +76,12 @@ def test_browser_api_uploads_papers_persists_decisions_and_exports_csv(tmp_path:
     assert "accepted" in exported.text
 
 
+def test_browser_client_handles_empty_delete_responses():
+    app_js = (Path(__file__).parents[1] / "rheology_paper_ocr" / "ui" / "app.js").read_text(encoding="utf-8")
+
+    assert "response.status === 204" in app_js
+
+
 def test_browser_api_extracts_pdfs_from_zip_upload(tmp_path: Path):
     archive_bytes = io.BytesIO()
     with zipfile.ZipFile(archive_bytes, "w") as archive:

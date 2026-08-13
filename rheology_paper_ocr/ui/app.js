@@ -5,6 +5,7 @@ const apiKeyStorageKey = 'rheology-evidence.openrouter-api-key';
 async function api(path, options = {}) {
   const response = await fetch(path, options);
   if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || 'Request failed');
+  if (response.status === 204) return null;
   return response.headers.get('content-type')?.includes('application/json') ? response.json() : response;
 }
 
