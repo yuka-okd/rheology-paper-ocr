@@ -29,6 +29,11 @@
       </section>
       <section id="run-view" class="run-view hidden">
         <div id="status-banner" class="status-banner"></div>
+        <section id="run-progress" class="run-progress hidden" aria-live="polite">
+          <div class="progress-header"><div><div class="eyebrow">Run progress</div><strong id="progress-title"></strong></div><span id="progress-summary"></span></div>
+          <div class="progress-track" aria-hidden="true"><span id="progress-fill"></span></div>
+          <ol id="progress-list" class="progress-list"></ol>
+        </section>
         <div id="metrics" class="metrics"></div>
         <div class="table-toolbar">
           <div class="tabs" role="tablist">

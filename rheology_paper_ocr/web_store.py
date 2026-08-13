@@ -46,6 +46,13 @@ class LocalRunStore:
             rows = connection.execute("SELECT * FROM runs ORDER BY created_at DESC").fetchall()
         return [dict(row) for row in rows]
 
+    def delete_run(self, run_id: str) -> dict:
+        run = self.get_run(run_id)
+        with self._connect() as connection:
+            connection.execute("DELETE FROM reviewer_decisions WHERE run_id = ?", (run_id,))
+            connection.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+        return run
+
     def update_status(self, run_id: str, status: str, error: str | None = None) -> None:
         completed_at = _now() if status in {"completed", "failed", "blocked"} else None
         with self._connect() as connection:

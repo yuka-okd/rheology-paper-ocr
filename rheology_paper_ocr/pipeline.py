@@ -71,7 +71,10 @@ def load_saved_reviews(out_dir: Path) -> list[ReviewCandidate]:
 
 
 def _write_manifest(out_dir: Path, manifest: list[dict]) -> None:
-    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    manifest_path = out_dir / "manifest.json"
+    temporary_path = manifest_path.with_suffix(".json.tmp")
+    temporary_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    temporary_path.replace(manifest_path)
 
 
 def _page_number(image_path: Path) -> int | None:
@@ -382,6 +385,8 @@ def _run_papers(
             "status": "started",
             "paper_number": _paper_index_from_id(paper.paper_id),
         }
+        manifest.append(status)
+        _write_manifest(out_dir, manifest)
         try:
             text, image_paths = extract_text_and_pages(paper.path, paper_dir)
             try:
@@ -408,7 +413,6 @@ def _run_papers(
                         "result_path": _relative_to_run(paper_dir / "results.json", out_dir),
                     }
                 )
-                manifest.append(status)
                 _write_manifest(out_dir, manifest)
                 write_reports(out_dir, _flatten_results(results_by_paper, papers), _flatten_reviews(reviews_by_paper, papers))
                 continue
@@ -522,7 +526,6 @@ def _run_papers(
         except Exception as exc:
             results_by_paper.pop(paper.paper_id, None)
             status.update({"status": "failed", "error": str(exc)})
-        manifest.append(status)
         _write_manifest(out_dir, manifest)
         write_reports(out_dir, _flatten_results(results_by_paper, papers), _flatten_reviews(reviews_by_paper, papers))
         if stop_after_paper:

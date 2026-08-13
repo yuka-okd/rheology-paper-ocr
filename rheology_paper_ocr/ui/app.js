@@ -12,17 +12,20 @@ function escape(value) { const div = document.createElement('div'); div.textCont
 function effectiveDecision(row) { return row.reviewer_decision || row.decision || 'needs_review'; }
 function badge(decision) { return `<span class="badge ${escape(decision)}">${escape(decision.replace('_', ' '))}</span>`; }
 function updateFileCount(files) { const count = files.length; $('#file-count').textContent = count ? `${count} file${count === 1 ? '' : 's'} selected` : 'No files selected'; }
+function progressLabel(status) { return ({ started: 'Processing', queued: 'Queued', completed: 'Completed', completed_no_findings: 'No findings', failed: 'Failed', blocked_insufficient_credits: 'Blocked' }[status] || status.replaceAll('_', ' ')); }
 
 async function loadRuns() {
   state.runs = await api('/api/runs');
+  if (state.selectedRunId && !state.runs.some(run => run.id === state.selectedRunId)) state.selectedRunId = null;
   renderRuns();
   if (!state.selectedRunId && state.runs[0]) await selectRun(state.runs[0].id);
   if (!state.runs.length) showEmpty();
 }
 
 function renderRuns() {
-  $('#run-list').innerHTML = state.runs.map(run => `<button class="run-item ${run.id === state.selectedRunId ? 'active' : ''}" data-run="${run.id}"><strong>${escape(run.name)}</strong><span>${run.completed_papers}/${run.paper_count} papers · ${escape(run.status)}</span></button>`).join('');
+  $('#run-list').innerHTML = state.runs.map(run => `<div class="run-entry ${run.id === state.selectedRunId ? 'active' : ''}"><button class="run-item" data-run="${run.id}"><strong>${escape(run.name)}</strong><span>${run.completed_papers}/${run.paper_count} papers · ${escape(run.status)}</span></button><button class="delete-run" data-delete-run="${run.id}" ${run.status === 'running' ? 'disabled' : ''} title="${run.status === 'running' ? 'Cannot delete an active run' : 'Delete run'}">Delete</button></div>`).join('');
   document.querySelectorAll('[data-run]').forEach(button => button.addEventListener('click', () => selectRun(button.dataset.run)));
+  document.querySelectorAll('[data-delete-run]').forEach(button => button.addEventListener('click', () => deleteRun(button.dataset.deleteRun)));
 }
 
 async function selectRun(id) {
@@ -37,18 +40,31 @@ async function selectRun(id) {
 function showEmpty() { $('#empty-state').classList.remove('hidden'); $('#run-view').classList.add('hidden'); $('#actions').classList.add('hidden'); $('#run-title').textContent = 'Extraction runs'; $('#run-subtitle').textContent = 'Choose a run or start a new extraction'; }
 
 function renderDetail() {
-  const { run, results, review_queue } = state.detail;
+  const { run, results, review_queue, progress } = state.detail;
   $('#empty-state').classList.add('hidden'); $('#run-view').classList.remove('hidden'); $('#actions').classList.remove('hidden');
   $('#run-title').textContent = run.name; $('#run-subtitle').textContent = `${run.completed_papers}/${run.paper_count} papers completed`;
   $('#csv-export').href = state.detail.export_csv_url; $('#print-export').href = state.detail.print_url;
   const status = $('#status-banner'); status.className = 'status-banner';
   status.textContent = run.error || ({ ready: 'Ready to extract.', running: 'Extraction is running locally. This view refreshes automatically.', completed: 'Extraction completed. Review rows before export.', blocked: 'Extraction paused because provider credit is exhausted.', failed: 'Extraction failed. Inspect the run details.' }[run.status] || run.status);
   if (['blocked', 'failed'].includes(run.status)) status.classList.add('error'); else if (run.status === 'running' || review_queue.length) status.classList.add('warning');
+  renderProgress(run, progress);
   const decisions = results.map(effectiveDecision);
   $('#metrics').innerHTML = [
     ['Extracted rows', results.length], ['Accepted', decisions.filter(v => v === 'accepted').length], ['Needs review', decisions.filter(v => v === 'needs_review').length], ['Review queue', review_queue.length]
   ].map(([label,value]) => `<div class="metric"><span>${label}</span><strong>${value}</strong></div>`).join('');
   renderTable();
+}
+
+function renderProgress(run, progress) {
+  const panel = $('#run-progress');
+  if (run.status !== 'running') { panel.classList.add('hidden'); return; }
+  const current = progress.papers.find(paper => paper.status === 'started');
+  const percent = progress.total ? ((progress.completed / progress.total) * 100) : 0;
+  panel.classList.remove('hidden');
+  $('#progress-title').textContent = current ? `Processing ${current.name}` : 'Preparing extraction queue';
+  $('#progress-summary').textContent = `${progress.completed}/${progress.total} complete · ${progress.queued} queued`;
+  $('#progress-fill').style.width = `${percent}%`;
+  $('#progress-list').innerHTML = progress.papers.map(paper => `<li class="progress-paper ${escape(paper.status)}"><span class="paper-state" aria-hidden="true"></span><span class="paper-name">${escape(paper.name)}</span><span class="paper-status">${escape(progressLabel(paper.status))}</span></li>`).join('');
 }
 
 function renderTable() {
@@ -76,6 +92,16 @@ async function saveDecision(decision) {
   if (!state.selectedRow) return;
   await api(`/api/runs/${state.selectedRunId}/decisions`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({curve_id:state.selectedRow.curve_id, figure_id:state.selectedRow.figure_id, decision, note:$('#review-note').value}) });
   await selectRun(state.selectedRunId); openReview(state.detail.results.find(row => row.curve_id === state.selectedRow.curve_id && row.figure_id === state.selectedRow.figure_id));
+}
+
+async function deleteRun(runId) {
+  const run = state.runs.find(item => item.id === runId);
+  if (!run || !window.confirm(`Delete "${run.name}" and all of its local files? This cannot be undone.`)) return;
+  try {
+    await api(`/api/runs/${runId}`, { method:'DELETE' });
+    if (state.selectedRunId === runId) { state.selectedRunId = null; state.detail = null; clearInterval(state.poll); }
+    await loadRuns();
+  } catch (err) { window.alert(err.message); }
 }
 
 async function createRun(event) {

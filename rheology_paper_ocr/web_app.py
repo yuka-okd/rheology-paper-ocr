@@ -99,6 +99,21 @@ def create_app(data_dir: Path):
         except KeyError:
             raise HTTPException(status_code=404, detail="Run not found.")
 
+    @app.delete("/api/runs/{run_id}", status_code=204)
+    def delete_run(run_id: str):
+        try:
+            run = store.get_run(run_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Run not found.")
+        if run["status"] == "running":
+            raise HTTPException(status_code=409, detail="An active run cannot be deleted.")
+        run_dir = Path(run["input_dir"]).parent
+        expected_root = (store.data_dir / "runs").resolve()
+        if run_dir.resolve().parent != expected_root:
+            raise HTTPException(status_code=403, detail="Invalid local run path.")
+        store.delete_run(run_id)
+        shutil.rmtree(run_dir, ignore_errors=True)
+
     @app.post("/api/runs/{run_id}/decisions")
     def save_decision(run_id: str, request: DecisionRequest):
         if request.decision not in {"accepted", "needs_review", "rejected"}:
@@ -228,6 +243,7 @@ def _run_detail(run: dict, store: LocalRunStore) -> dict:
     return {
         "run": _run_summary(run),
         "manifest": manifest,
+        "progress": _run_progress(run, manifest),
         "results": results,
         "review_queue": review_rows,
         "export_csv_url": f"/api/runs/{run['id']}/export.csv",
@@ -272,7 +288,34 @@ def _save_pdf(source, input_dir: Path, source_name: str, index: int) -> str:
 
 
 def _pdf_input_files(input_dir: Path) -> list[Path]:
-    return [path for path in input_dir.iterdir() if path.is_file() and path.suffix.lower() == ".pdf"]
+    return sorted(path for path in input_dir.iterdir() if path.is_file() and path.suffix.lower() == ".pdf")
+
+
+def _run_progress(run: dict, manifest: list[dict]) -> dict:
+    statuses_by_source = {Path(item.get("source_pdf", "")).name: item for item in manifest}
+    papers = []
+    for index, path in enumerate(_pdf_input_files(Path(run["input_dir"])), start=1):
+        status = statuses_by_source.get(path.name, {})
+        papers.append(
+            {
+                "paper_id": status.get("paper_id", f"paper_{index:04d}"),
+                "name": _display_input_name(path.name),
+                "status": status.get("status", "queued"),
+            }
+        )
+    completed_statuses = {"completed", "completed_no_findings"}
+    return {
+        "total": len(papers),
+        "completed": sum(item["status"] in completed_statuses for item in papers),
+        "processing": sum(item["status"] == "started" for item in papers),
+        "queued": sum(item["status"] == "queued" for item in papers),
+        "papers": papers,
+    }
+
+
+def _display_input_name(name: str) -> str:
+    prefix, separator, remainder = name.partition("-")
+    return remainder if separator and len(prefix) == 3 and prefix.isdigit() else name
 
 
 def _extract_pdfs_from_zip(source, input_dir: Path, start_index: int) -> list[str]:

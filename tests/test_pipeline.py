@@ -49,6 +49,7 @@ def test_pipeline_persists_evidence_rows_and_skips_unchanged_completed_papers(mo
     )
 
     def fake_extract(*args, **kwargs):
+        assert json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))[0]["status"] == "started"
         calls.append(kwargs)
         return PaperLLMExtraction(
             paper_id="paper_0001",
@@ -85,8 +86,8 @@ def test_pipeline_persists_evidence_rows_and_skips_unchanged_completed_papers(mo
             ],
         )
 
-    monkeypatch.setattr(pipeline, "extract_paper_with_llm", fake_extract)
     out_dir = tmp_path / "output"
+    monkeypatch.setattr(pipeline, "extract_paper_with_llm", fake_extract)
 
     first_results = run_pipeline(source_dir, out_dir)
     second_results = run_pipeline(source_dir, out_dir, resume=True)

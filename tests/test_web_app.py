@@ -37,7 +37,7 @@ def test_browser_api_uploads_papers_persists_decisions_and_exports_csv(tmp_path:
     assert home.status_code == 200
     assert "Rheology Evidence" in home.text
     assert stylesheet.status_code == 200
-    assert "--signal" in stylesheet.text
+    assert "--accent" in stylesheet.text
     assert created.status_code == 200
     run = created.json()["run"]
     output_dir = Path(LocalRunStore(tmp_path).get_run(run["id"])["output_dir"])
@@ -91,6 +91,53 @@ def test_browser_api_extracts_pdfs_from_zip_upload(tmp_path: Path):
     assert created.json()["run"]["paper_count"] == 2
     run = LocalRunStore(tmp_path).get_run(created.json()["run"]["id"])
     assert len([path for path in Path(run["input_dir"]).iterdir() if path.suffix.lower() == ".pdf"]) == 2
+
+
+def test_browser_run_detail_exposes_current_and_queued_papers(tmp_path: Path):
+    client = TestClient(create_app(tmp_path))
+    created = client.post(
+        "/api/runs",
+        files=[
+            ("files", ("first.pdf", b"%PDF-1.4\n", "application/pdf")),
+            ("files", ("second.pdf", b"%PDF-1.4\n", "application/pdf")),
+        ],
+    )
+    run_id = created.json()["run"]["id"]
+    run = LocalRunStore(tmp_path).get_run(run_id)
+    LocalRunStore(tmp_path).update_status(run_id, "running")
+    (Path(run["output_dir"]) / "manifest.json").write_text(
+        json.dumps(
+            [{"paper_id": "paper_0001", "source_pdf": str(Path(run["input_dir"]) / "001-first.pdf"), "status": "started"}]
+        ),
+        encoding="utf-8",
+    )
+
+    detail = client.get(f"/api/runs/{run_id}").json()
+
+    assert detail["progress"]["processing"] == 1
+    assert detail["progress"]["queued"] == 1
+    assert [paper["name"] for paper in detail["progress"]["papers"]] == ["first.pdf", "second.pdf"]
+
+
+def test_browser_api_deletes_inactive_run_and_refuses_active_run(tmp_path: Path):
+    client = TestClient(create_app(tmp_path))
+    created = client.post(
+        "/api/runs",
+        files=[("files", ("paper.pdf", b"%PDF-1.4\n", "application/pdf"))],
+    )
+    run_id = created.json()["run"]["id"]
+    run_dir = Path(LocalRunStore(tmp_path).get_run(run_id)["input_dir"]).parent
+
+    deleted = client.delete(f"/api/runs/{run_id}")
+
+    assert deleted.status_code == 204
+    assert not run_dir.exists()
+    assert client.get(f"/api/runs/{run_id}").status_code == 404
+
+    active = LocalRunStore(tmp_path).create_run("Active run")
+    LocalRunStore(tmp_path).update_status(active["id"], "running")
+    refused = client.delete(f"/api/runs/{active['id']}")
+    assert refused.status_code == 409
 
 
 def test_existing_browser_run_resumes_completed_papers(tmp_path: Path, monkeypatch):
