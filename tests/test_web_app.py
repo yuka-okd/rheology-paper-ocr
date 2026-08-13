@@ -128,6 +128,30 @@ def test_browser_run_detail_exposes_current_and_queued_papers(tmp_path: Path):
     assert [paper["name"] for paper in detail["progress"]["papers"]] == ["first.pdf", "second.pdf"]
 
 
+def test_browser_run_summary_marks_interrupted_papers_retryable(tmp_path: Path):
+    client = TestClient(create_app(tmp_path))
+    created = client.post(
+        "/api/runs",
+        files=[("files", ("paper.pdf", b"%PDF-1.4\n", "application/pdf"))],
+    )
+    run_id = created.json()["run"]["id"]
+    run = LocalRunStore(tmp_path).get_run(run_id)
+    (Path(run["output_dir"]) / "manifest.json").write_text(
+        json.dumps([{"paper_id": "paper_0001", "source_pdf": str(Path(run["input_dir"]) / "001-paper.pdf"), "status": "failed"}]),
+        encoding="utf-8",
+    )
+
+    assert client.get(f"/api/runs/{run_id}").json()["run"]["retryable_papers"] == 1
+
+
+def test_browser_ledger_uses_paper_progress_instead_of_separate_progress_panel():
+    app_js = (Path(__file__).parents[1] / "rheology_paper_ocr" / "ui" / "app.js").read_text(encoding="utf-8")
+    index_html = (Path(__file__).parents[1] / "rheology_paper_ocr" / "ui" / "index.html").read_text(encoding="utf-8")
+
+    assert "function ledgerRows()" in app_js
+    assert "id=\"run-progress\"" not in index_html
+
+
 def test_browser_api_deletes_inactive_run_and_refuses_active_run(tmp_path: Path):
     client = TestClient(create_app(tmp_path))
     created = client.post(

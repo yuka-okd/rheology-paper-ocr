@@ -7,12 +7,20 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
 from rheology_paper_ocr.schemas import PaperLLMExtraction
 
 
 class OpenRouterInsufficientCreditsError(RuntimeError):
     """Raised when OpenRouter rejects a request because the account lacks credit."""
+
+
+class OpenRouterTransientError(RuntimeError):
+    """A retryable provider or gateway response."""
+
+
+RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 
 
 
@@ -88,6 +96,8 @@ class OpenRouterClient:
         )
         self.last_model_used: str | None = None
         self.last_attempts: list[dict[str, str]] = []
+        self.retry_attempts = max(1, int(os.environ.get("OPENROUTER_RETRY_ATTEMPTS", "4")))
+        self.retry_min_wait_seconds = float(os.environ.get("OPENROUTER_RETRY_MIN_WAIT_SECONDS", "0.5"))
 
     def extract(
         self,
@@ -195,7 +205,7 @@ class OpenRouterClient:
                 return parse_json_response(fallback_data["choices"][0]["message"]["content"])
 
     def _post_chat(self, payload: dict[str, Any]) -> httpx.Response:
-        return httpx.post(
+        response = httpx.post(
             f"{self.base_url}/chat/completions",
             headers={
                 "Authorization": f"Bearer {self.api_key}",
@@ -211,16 +221,21 @@ class OpenRouterClient:
                 pool=30.0,
             ),
         )
+        status_code = getattr(response, "status_code", None)
+        if status_code and status_code >= 400:
+            _raise_if_insufficient_credits(_response_data(response))
+        if status_code in RETRYABLE_STATUS_CODES:
+            raise OpenRouterTransientError(f"OpenRouter returned retryable status {status_code}.")
+        return response
 
-    def _post_chat_with_retries(self, payload: dict[str, Any], attempts: int = 2) -> httpx.Response:
-        last_exc: httpx.ReadTimeout | None = None
-        for _ in range(attempts):
-            try:
-                return self._post_chat(payload)
-            except httpx.ReadTimeout as exc:
-                last_exc = exc
-        assert last_exc is not None
-        raise last_exc
+    def _post_chat_with_retries(self, payload: dict[str, Any]) -> httpx.Response:
+        retrying = Retrying(
+            retry=retry_if_exception_type((httpx.TransportError, OpenRouterTransientError)),
+            stop=stop_after_attempt(self.retry_attempts),
+            wait=wait_exponential_jitter(initial=self.retry_min_wait_seconds, max=12),
+            reraise=True,
+        )
+        return retrying(self._post_chat, payload)
 
 
 def _is_schema_rejection(data: dict[str, Any]) -> bool:
@@ -237,6 +252,14 @@ def _raise_if_insufficient_credits(data: dict[str, Any]) -> None:
     lowered = message.lower()
     if any(token in lowered for token in ("requires more credits", "can only afford", "insufficient credit", "not enough credits")):
         raise OpenRouterInsufficientCreditsError(message)
+
+
+def _response_data(response: httpx.Response) -> dict[str, Any]:
+    try:
+        data = response.json()
+    except (json.JSONDecodeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:

@@ -276,10 +276,13 @@ def _is_resumable_complete(status: dict | None, sha256: str, paper_dir: Path) ->
 
 
 def _write_paper_results(paper_dir: Path, results: list[JoinedResult]) -> None:
-    (paper_dir / "results.json").write_text(
+    path = paper_dir / "results.json"
+    temporary_path = path.with_suffix(".json.tmp")
+    temporary_path.write_text(
         json.dumps([result.model_dump(mode="json") for result in results], indent=2),
         encoding="utf-8",
     )
+    temporary_path.replace(path)
 
 
 def run_pipeline(

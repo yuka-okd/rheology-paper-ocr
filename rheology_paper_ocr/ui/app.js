@@ -13,7 +13,7 @@ function escape(value) { const div = document.createElement('div'); div.textCont
 function effectiveDecision(row) { return row.reviewer_decision || row.decision || 'needs_review'; }
 function badge(decision) { return `<span class="badge ${escape(decision)}">${escape(decision.replace('_', ' '))}</span>`; }
 function updateFileCount(files) { const count = files.length; $('#file-count').textContent = count ? `${count} file${count === 1 ? '' : 's'} selected` : 'No files selected'; }
-function progressLabel(status) { return ({ started: 'Processing', queued: 'Queued', completed: 'Completed', completed_no_findings: 'No findings', failed: 'Failed', blocked_insufficient_credits: 'Blocked' }[status] || status.replaceAll('_', ' ')); }
+function progressLabel(status) { return ({ started: 'Processing', queued: 'Queued', completed: 'Complete', completed_no_findings: 'No findings', failed: 'Retry needed', blocked_insufficient_credits: 'Credit required' }[status] || status.replaceAll('_', ' ')); }
 
 async function loadRuns() {
   state.runs = await api('/api/runs');
@@ -25,7 +25,7 @@ async function loadRuns() {
 
 function runAction(run) {
   if (run.status === 'running') return `<button class="run-action" data-pause-run="${run.id}" aria-label="Pause run" title="Pause run"><img class="run-icon" src="/static/icons/pause.svg" alt=""></button>`;
-  if (run.status === 'paused') return `<button class="run-action" data-resume-run="${run.id}" aria-label="Resume run" title="Resume run"><img class="run-icon" src="/static/icons/play.svg" alt=""></button>`;
+  if (['paused', 'blocked', 'failed'].includes(run.status) || run.retryable_papers) return `<button class="run-action" data-resume-run="${run.id}" aria-label="Retry unfinished papers" title="Retry unfinished papers"><img class="run-icon" src="/static/icons/play.svg" alt=""></button>`;
   return '';
 }
 
@@ -54,9 +54,8 @@ function renderDetail() {
   $('#run-title').textContent = run.name; $('#run-subtitle').textContent = `${run.completed_papers}/${run.paper_count} papers completed`;
   $('#csv-export').href = state.detail.export_csv_url; $('#print-export').href = state.detail.print_url;
   const status = $('#status-banner'); status.className = 'status-banner';
-  status.textContent = run.error || ({ ready: 'Ready to extract.', running: 'Extraction is running locally. This view refreshes automatically.', paused: 'Extraction is paused. Resume it from the run list.', completed: 'Extraction completed. Review rows before export.', blocked: 'Extraction paused because provider credit is exhausted.', failed: 'Extraction failed. Inspect the run details.' }[run.status] || run.status);
+  status.textContent = run.error || ({ ready: 'Ready to extract.', running: 'Extraction is running locally. Paper rows update as each completes.', paused: 'Extraction is paused. Resume it from the run list.', completed: run.retryable_papers ? `${run.retryable_papers} paper${run.retryable_papers === 1 ? '' : 's'} can be retried from the run list.` : 'Extraction completed. Review rows before export.', blocked: 'Extraction paused because provider credit is exhausted. Add credit, then retry unfinished papers.', failed: 'Extraction stopped unexpectedly. Retry unfinished papers from the run list.' }[run.status] || run.status);
   if (['blocked', 'failed'].includes(run.status)) status.classList.add('error'); else if (run.status === 'running' || review_queue.length) status.classList.add('warning');
-  renderProgress(run, progress);
   const decisions = results.map(effectiveDecision);
   $('#metrics').innerHTML = [
     ['Extracted rows', results.length], ['Accepted', decisions.filter(v => v === 'accepted').length], ['Needs review', decisions.filter(v => v === 'needs_review').length], ['Review queue', review_queue.length]
@@ -64,28 +63,39 @@ function renderDetail() {
   renderTable();
 }
 
-function renderProgress(run, progress) {
-  const panel = $('#run-progress');
-  if (run.status !== 'running') { panel.classList.add('hidden'); return; }
-  const current = progress.papers.find(paper => paper.status === 'started');
-  const percent = progress.total ? ((progress.completed / progress.total) * 100) : 0;
-  panel.classList.remove('hidden');
-  $('#progress-title').textContent = current ? `Processing ${current.name}` : 'Preparing extraction queue';
-  $('#progress-summary').textContent = `${progress.completed}/${progress.total} complete · ${progress.queued} queued`;
-  $('#progress-fill').style.width = `${percent}%`;
-  $('#progress-list').innerHTML = progress.papers.map(paper => `<li class="progress-paper ${escape(paper.status)}"><span class="paper-state" aria-hidden="true"></span><span class="paper-name">${escape(paper.name)}</span><span class="paper-status">${escape(progressLabel(paper.status))}</span></li>`).join('');
+function renderTable() {
+  const rows = ledgerRows();
+  const filteredRows = state.filter === 'all' ? rows : rows.filter(row => row.kind === 'result' && effectiveDecision(row.result) === state.filter);
+  $('#table-count').textContent = state.filter === 'all' ? `${state.detail.progress.completed}/${state.detail.progress.total} papers complete` : `${filteredRows.length} rows`;
+  $('#result-table').innerHTML = filteredRows.map((row, index) => row.kind === 'result' ? resultRow(row.result, index) : paperRow(row)).join('') || '<tr><td colspan="7" class="cell-sub">No rows in this view.</td></tr>';
+  document.querySelectorAll('#result-table tr[data-index]').forEach(element => element.addEventListener('click', () => openReview(filteredRows[Number(element.dataset.index)].result)));
 }
 
-function renderTable() {
-  const rows = state.detail.results.filter(row => state.filter === 'all' || effectiveDecision(row) === state.filter);
-  $('#table-count').textContent = `${rows.length} rows`;
-  $('#result-table').innerHTML = rows.map((row, index) => `<tr data-index="${index}">
-    <td><div class="cell-title">${escape(row.paper_id)}</div><div class="cell-sub">${escape(row.figure_id || 'Unlabelled figure')}</div></td>
-    <td><div class="cell-title">${escape(row.curve_legend_text || row.curve_id)}</div><div class="cell-sub">${escape(row.x_axis_label || 'axis unclear')} → ${escape(row.y_axis_label || 'axis unclear')}</div></td>
+function ledgerRows() {
+  const resultsByPaper = new Map();
+  state.detail.results.forEach(result => resultsByPaper.set(result.paper_id, [...(resultsByPaper.get(result.paper_id) || []), result]));
+  const reviewsByPaper = new Map();
+  state.detail.review_queue.forEach(review => reviewsByPaper.set(review.paper_id, [...(reviewsByPaper.get(review.paper_id) || []), review]));
+  return state.detail.progress.papers.flatMap(paper => {
+    const results = resultsByPaper.get(paper.paper_id) || [];
+    if (results.length) return results.map(result => ({ kind: 'result', result, paper }));
+    const review = (reviewsByPaper.get(paper.paper_id) || [])[0];
+    return [{ kind: 'paper', paper, review }];
+  });
+}
+
+function paperStatus(status) { return `<span class="paper-status-badge ${escape(status)}"><span></span>${escape(progressLabel(status))}</span>`; }
+function paperRow({ paper, review }) {
+  const detail = review?.reasons?.[0] || ({ queued: 'Waiting in the local extraction queue.', started: 'Reading paper, locating figures, and extracting evidence.', completed_no_findings: 'No eligible evidence rows were found.', completed: 'No evidence rows were retained for this paper.', failed: 'Provider or extraction issue. Retry this run to continue.', blocked_insufficient_credits: 'Provider credit is required before this paper can continue.' }[paper.status] || 'No extraction detail is available yet.');
+  const decision = review ? badge('needs_review') : '<span class="cell-sub">—</span>';
+  return `<tr class="ledger-paper ${escape(paper.status)}"><td><div class="cell-title">${escape(paper.name)}</div><div class="cell-sub">${escape(paper.paper_id)}</div></td><td>${paperStatus(paper.status)}</td><td colspan="4"><div class="ledger-message">${escape(detail)}</div></td><td>${decision}</td></tr>`;
+}
+function resultRow(row, index) {
+  return `<tr data-index="${index}" class="ledger-result"><td><div class="cell-title">${escape(row.paper_id)}</div><div class="cell-sub">${escape(row.figure_id || 'Unlabelled figure')}</div></td>
+    <td>${paperStatus('completed')}</td><td><div class="cell-title">${escape(row.curve_legend_text || row.curve_id)}</div><div class="cell-sub">${escape(row.x_axis_label || 'axis unclear')} → ${escape(row.y_axis_label || 'axis unclear')}</div></td>
     <td><div class="cell-title">${escape(row.sample_display_name || 'Unresolved')}</div><div class="cell-sub">${escape(row.sample_composition || '')}</div></td>
     <td>${escape(row.fibre_outcome)}</td><td><div class="cell-sub">${escape(row.fibre_evidence_text || 'No direct evidence')}</div></td><td>${badge(effectiveDecision(row))}</td>
-  </tr>`).join('') || '<tr><td colspan="6" class="cell-sub">No rows in this view.</td></tr>';
-  document.querySelectorAll('#result-table tr[data-index]').forEach(element => element.addEventListener('click', () => openReview(rows[Number(element.dataset.index)])));
+  </tr>`;
 }
 
 function openReview(row) {

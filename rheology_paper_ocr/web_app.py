@@ -109,7 +109,7 @@ def create_app(data_dir: Path):
 
     @app.post("/api/runs/{run_id}/resume")
     def resume_run(run_id: str, request: StartRunRequest):
-        return launch_run(run_id, request, {"paused"})
+        return launch_run(run_id, request, {"paused", "blocked", "failed", "completed"})
 
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str):
@@ -229,6 +229,7 @@ def _run_job(store: LocalRunStore, run_id: str, api_key: str | None = None) -> N
 
 def _run_summary(run: dict) -> dict:
     manifest = read_json(Path(run["output_dir"]) / "manifest.json", [])
+    retryable_statuses = {"failed", "blocked_insufficient_credits", "started"}
     return {
         "id": run["id"],
         "name": run["name"],
@@ -238,6 +239,7 @@ def _run_summary(run: dict) -> dict:
         "error": run["error"],
         "paper_count": len(manifest) or len(_pdf_input_files(Path(run["input_dir"]))),
         "completed_papers": sum(item.get("status") in {"completed", "completed_no_findings"} for item in manifest),
+        "retryable_papers": sum(item.get("status") in retryable_statuses for item in manifest),
     }
 
 

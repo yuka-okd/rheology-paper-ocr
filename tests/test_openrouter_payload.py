@@ -532,6 +532,7 @@ def test_client_retries_transient_read_timeout(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", fake_post)
     client = OpenRouterClient(api_key="test-key", model="test-model")
+    client.retry_min_wait_seconds = 0
 
     client.extract("Extract.", [])
 
@@ -565,6 +566,8 @@ def test_client_fails_over_to_configured_model_after_primary_timeouts(monkeypatc
 
     monkeypatch.setattr(httpx, "post", fake_post)
     client = OpenRouterClient(api_key="test-key", model="primary-model", fallback_model="fallback-model")
+    client.retry_attempts = 2
+    client.retry_min_wait_seconds = 0
 
     result = client.extract("Extract.", [], raw_response_path=tmp_path / "raw.json")
 
@@ -573,6 +576,34 @@ def test_client_fails_over_to_configured_model_after_primary_timeouts(monkeypatc
     assert client.last_model_used == "fallback-model"
     assert client.last_attempts[-1] == {"model": "fallback-model", "status": "succeeded"}
     assert (tmp_path / "raw_fallback.json").exists()
+
+
+def test_client_retries_retryable_gateway_status(monkeypatch):
+    attempts = []
+
+    class FakeResponse:
+        def __init__(self, status_code, content):
+            self.status_code = status_code
+            self.content = content
+
+        def json(self):
+            return self.content
+
+        def raise_for_status(self):
+            return None
+
+    def fake_post(*args, **kwargs):
+        attempts.append(kwargs["json"])
+        if len(attempts) == 1:
+            return FakeResponse(503, {"error": {"message": "Temporarily unavailable"}})
+        return FakeResponse(200, {"choices": [{"message": {"content": '{"paper_id":"paper_0001","source_pdf":"paper.pdf","has_rheology_chart":false,"findings":[]}'}}]})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    client = OpenRouterClient(api_key="test-key", model="test-model")
+    client.retry_min_wait_seconds = 0
+
+    assert client.extract("Extract.", [])["findings"] == []
+    assert len(attempts) == 2
 
 
 def test_client_does_not_fail_over_when_the_account_has_insufficient_credit(monkeypatch):
