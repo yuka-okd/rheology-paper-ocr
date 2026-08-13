@@ -28,4 +28,4 @@ rheology-paper-ocr = "rheology_paper_ocr.cli:main"
 packages = ["rheology_paper_ocr"]
 
 [tool.setuptools.package-data]
-rheology_paper_ocr = ["ui/*"]
+rheology_paper_ocr = ["ui/*", "ui/icons/*"]

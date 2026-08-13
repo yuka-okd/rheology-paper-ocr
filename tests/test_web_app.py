@@ -28,6 +28,7 @@ def test_browser_api_uploads_papers_persists_decisions_and_exports_csv(tmp_path:
 
     home = client.get("/")
     stylesheet = client.get("/static/app.css")
+    pause_icon = client.get("/static/icons/pause.svg")
     created = client.post(
         "/api/runs",
         data={"name": "Browser test"},
@@ -38,6 +39,8 @@ def test_browser_api_uploads_papers_persists_decisions_and_exports_csv(tmp_path:
     assert "Rheology Evidence" in home.text
     assert stylesheet.status_code == 200
     assert "--accent" in stylesheet.text
+    assert pause_icon.status_code == 200
+    assert "lucide-pause" in pause_icon.text
     assert created.status_code == 200
     run = created.json()["run"]
     output_dir = Path(LocalRunStore(tmp_path).get_run(run["id"])["output_dir"])

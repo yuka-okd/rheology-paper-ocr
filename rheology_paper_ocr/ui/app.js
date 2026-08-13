@@ -23,13 +23,13 @@ async function loadRuns() {
 }
 
 function runAction(run) {
-  if (run.status === 'running') return `<button class="run-action" data-pause-run="${run.id}" aria-label="Pause run" title="Pause run"><span aria-hidden="true">⏸</span></button>`;
-  if (run.status === 'paused') return `<button class="run-action" data-resume-run="${run.id}" aria-label="Resume run" title="Resume run"><span aria-hidden="true">▶</span></button>`;
+  if (run.status === 'running') return `<button class="run-action" data-pause-run="${run.id}" aria-label="Pause run" title="Pause run"><img class="run-icon" src="/static/icons/pause.svg" alt=""></button>`;
+  if (run.status === 'paused') return `<button class="run-action" data-resume-run="${run.id}" aria-label="Resume run" title="Resume run"><img class="run-icon" src="/static/icons/play.svg" alt=""></button>`;
   return '';
 }
 
 function renderRuns() {
-  $('#run-list').innerHTML = state.runs.map(run => `<div class="run-entry ${run.id === state.selectedRunId ? 'active' : ''}"><button class="run-item" data-run="${run.id}"><strong>${escape(run.name)}</strong><span>${run.completed_papers}/${run.paper_count} papers · ${escape(run.status)}</span></button><div class="run-controls">${runAction(run)}<button class="delete-run" data-delete-run="${run.id}" ${run.status === 'running' ? 'disabled' : ''} aria-label="Delete run" title="${run.status === 'running' ? 'Pause an active run before deleting it' : 'Delete run'}"><span aria-hidden="true">⌫</span></button></div></div>`).join('');
+  $('#run-list').innerHTML = state.runs.map(run => `<div class="run-entry ${run.id === state.selectedRunId ? 'active' : ''}"><button class="run-item" data-run="${run.id}"><strong>${escape(run.name)}</strong><span>${run.completed_papers}/${run.paper_count} papers · ${escape(run.status)}</span></button><div class="run-controls">${runAction(run)}<button class="delete-run" data-delete-run="${run.id}" ${run.status === 'running' ? 'disabled' : ''} aria-label="Delete run" title="${run.status === 'running' ? 'Pause an active run before deleting it' : 'Delete run'}"><img class="run-icon" src="/static/icons/trash-2.svg" alt=""></button></div></div>`).join('');
   document.querySelectorAll('[data-run]').forEach(button => button.addEventListener('click', () => selectRun(button.dataset.run)));
   document.querySelectorAll('[data-delete-run]').forEach(button => button.addEventListener('click', () => deleteRun(button.dataset.deleteRun)));
   document.querySelectorAll('[data-pause-run]').forEach(button => button.addEventListener('click', () => pauseRun(button.dataset.pauseRun)));
