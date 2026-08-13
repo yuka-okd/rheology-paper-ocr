@@ -45,6 +45,7 @@ def create_app(data_dir: Path):
     globals()["StartRunRequest"] = StartRunRequest
 
     store = LocalRunStore(data_dir)
+    store.pause_orphaned_runs()
     ui_dir = Path(__file__).with_name("ui")
     app = FastAPI(title="Rheology Paper OCR", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=ui_dir), name="static")
@@ -74,14 +75,13 @@ def create_app(data_dir: Path):
             raise HTTPException(status_code=400, detail="Upload at least one PDF file or ZIP containing PDFs.")
         return {"run": _run_summary(store.get_run(run["id"])), "files": saved}
 
-    @app.post("/api/runs/{run_id}/start")
-    def start_run(run_id: str, request: StartRunRequest):
+    def launch_run(run_id: str, request: StartRunRequest, allowed_statuses: set[str]):
         try:
             run = store.get_run(run_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="Run not found.")
-        if run["status"] == "running":
-            raise HTTPException(status_code=409, detail="Run is already in progress.")
+        if run["status"] not in allowed_statuses:
+            raise HTTPException(status_code=409, detail=f"This run cannot be started while it is {run['status']}.")
         if not _pdf_input_files(Path(run["input_dir"])):
             raise HTTPException(status_code=400, detail="No PDF inputs are available for this run.")
         api_key = request.api_key.strip() if request.api_key else None
@@ -91,6 +91,25 @@ def create_app(data_dir: Path):
         thread = threading.Thread(target=_run_job, args=(store, run_id, api_key), daemon=True)
         thread.start()
         return _run_summary(store.get_run(run_id))
+
+    @app.post("/api/runs/{run_id}/start")
+    def start_run(run_id: str, request: StartRunRequest):
+        return launch_run(run_id, request, {"ready", "blocked", "failed"})
+
+    @app.post("/api/runs/{run_id}/pause")
+    def pause_run(run_id: str):
+        try:
+            run = store.get_run(run_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Run not found.")
+        if run["status"] != "running":
+            raise HTTPException(status_code=409, detail="Only an active run can be paused.")
+        store.update_status(run_id, "paused")
+        return _run_summary(store.get_run(run_id))
+
+    @app.post("/api/runs/{run_id}/resume")
+    def resume_run(run_id: str, request: StartRunRequest):
+        return launch_run(run_id, request, {"paused"})
 
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str):
@@ -193,7 +212,10 @@ def _run_job(store: LocalRunStore, run_id: str, api_key: str | None = None) -> N
             output_dir,
             api_key=api_key,
             resume=(output_dir / "manifest.json").exists(),
+            should_pause=lambda: store.get_run(run_id)["status"] == "paused",
         )
+        if store.get_run(run_id)["status"] == "paused":
+            return
         manifest = read_json(output_dir / "manifest.json", [])
         if any(item.get("status") == "blocked_insufficient_credits" for item in manifest):
             store.update_status(run_id, "blocked", "OpenRouter credit is exhausted.")

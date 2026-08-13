@@ -107,18 +107,18 @@ sample definitions, formulation aliases, and fibre outcome evidence.
 Return ONLY valid JSON matching the provided schema.
 
 Rules:
-- Include one finding per rheology chart series/line when possible.
+- Return one compact finding per series: no explanatory prose and at most three points.
 - When an image is attached, only report charts visible on that page and set page to the attached page number.
 - Set x_axis_scale and y_axis_scale to "linear", "log", or "unclear". Keep points in ascending x order.
 - Return the flat finding schema directly. Do not wrap findings in a chart object or add figure captions, chart type, or trend prose.
-- A rheology chart includes viscosity/shear rate, shear stress, modulus, frequency sweep, or flow curve plots.
-- This workflow is limited to bulk shear rheology. Do not report extensional/elongational viscosity, capillary-breakup, or filament-thinning plots, even when they are relevant to electrospinning.
+- Report only shear viscosity/stress, modulus, frequency-sweep, or flow curves.
+- Exclude extensional, capillary-breakup, and filament-thinning plots.
 - Treat an axis labelled "strain rate" or "extension rate" as out of scope unless it explicitly says "shear rate".
 - Digitize at most three approximate points per series: start, turning point, and end.
 - On a broken x axis, use the far-right point as the end.
 - `color_traces` only cross-check count/direction, never values or legend mappings.
-- A concentration-viscosity plot is not a flow curve. Extract its points, axes, and series mapping, but do not call its increase "shear-thickening".
-- Map each line to the sample/formulation using legend, caption, nearby text, methods, or tables.
+- A concentration-viscosity plot is not a flow curve or shear-thickening.
+- Map each line to the sample/formulation using legend, caption, nearby text, methods, or tables. For a single-series chart with no legend, use its specific caption formulation as `curve_legend_text` and state that source in the sample evidence.
 - Fibre outcome is text-only. Do not infer fibre formation from SEM images.
 - Fibre outcome must be "unclear" unless the text explicitly links that exact sample/formulation to fibre formation, beaded fibres, failure/no fibres, or not tested. Do not attach a broad molecular-weight or concentration rule to a borderline or differently named series.
 - A group statement such as "blended solutions formed fibres" is not evidence for an individual plotted series unless it defines a numerical or compositional range that unambiguously includes that series.
@@ -168,13 +168,16 @@ def extract_paper_with_llm(
 
 
 def normalize_extraction_payload(
-    payload: dict[str, Any],
+    payload: dict[str, Any] | list[Any],
     paper_id: str,
     source_pdf: str,
     default_page: int | None = None,
     default_chart_crop_path: str | None = None,
 ) -> dict[str, Any]:
-    normalized = dict(payload)
+    # A few otherwise capable providers ignore the schema wrapper and return a
+    # flat JSON array. It is a recoverable legacy response shape, not a paper
+    # extraction failure.
+    normalized = {"findings": payload} if isinstance(payload, list) else dict(payload)
     normalized.setdefault("paper_id", paper_id)
     normalized.setdefault("source_pdf", source_pdf)
     normalized.setdefault("has_rheology_chart", bool(normalized.get("findings")))
@@ -204,9 +207,11 @@ def normalize_extraction_payload(
     return normalized
 
 
-def _normalize_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _normalize_findings(findings: list[Any]) -> list[dict[str, Any]]:
     flattened: list[dict[str, Any]] = []
     for index, finding in enumerate(findings, start=1):
+        if not isinstance(finding, dict):
+            continue
         if "curve_id" in finding:
             item = dict(finding)
             item["points"] = _normalize_points(item.get("points") or [])
@@ -286,7 +291,7 @@ def _looks_like_flat_finding(finding: dict[str, Any]) -> bool:
 
 
 def _normalize_flat_finding(finding: dict[str, Any], chart_id: str, index: int) -> dict[str, Any]:
-    sample_id = finding.get("sample_id") or finding.get("series_id") or f"finding_{index}"
+    sample_id = finding.get("sample_id") or finding.get("series_id") or _legacy_sample_id(finding) or f"finding_{index}"
     fibre = finding.get("fibre_outcome") or finding.get("fiber_outcome")
     evidence_text = finding.get("evidence_text") or finding.get("evidence")
     fibre_evidence_text = (
@@ -294,7 +299,17 @@ def _normalize_flat_finding(finding: dict[str, Any], chart_id: str, index: int) 
         or finding.get("fiber_evidence")
         or finding.get("fibre_evidence_text")
         or finding.get("fiber_evidence_text")
+        or finding.get("fibre_outcome_evidence")
+        or finding.get("fiber_outcome_evidence")
         or evidence_text
+    )
+    display_name = finding.get("sample_display_name") or _legacy_sample_label(finding) or sample_id
+    composition = (
+        finding.get("sample_composition")
+        or finding.get("formulation_alias")
+        or finding.get("formulation")
+        or finding.get("sample_description")
+        or _legacy_sample_label(finding)
     )
     return {
         "figure_id": finding.get("figure_id") or finding.get("chart_id"),
@@ -302,11 +317,11 @@ def _normalize_flat_finding(finding: dict[str, Any], chart_id: str, index: int) 
         "chart_crop_path": finding.get("chart_crop_path"),
         "curve_id": finding.get("curve_id") or finding.get("series_id") or sample_id,
         "curve_visual_label": finding.get("curve_visual_label") or finding.get("visual_label") or finding.get("series_id"),
-        "curve_legend_text": finding.get("curve_legend_text") or finding.get("legend_text") or sample_id,
-        "x_axis_label": _axis_label(finding.get("x_axis")) or finding.get("x_axis_label"),
+        "curve_legend_text": finding.get("curve_legend_text") or finding.get("legend_text") or _legacy_sample_label(finding),
+        "x_axis_label": _axis_label(finding.get("x_axis")) or finding.get("x_axis_label") or finding.get("x_axis_name"),
         "x_axis_unit": finding.get("x_axis_unit"),
         "x_axis_scale": finding.get("x_axis_scale"),
-        "y_axis_label": _axis_label(finding.get("y_axis")) or finding.get("y_axis_label"),
+        "y_axis_label": _axis_label(finding.get("y_axis")) or finding.get("y_axis_label") or finding.get("y_axis_name"),
         "y_axis_unit": finding.get("y_axis_unit"),
         "y_axis_scale": finding.get("y_axis_scale"),
         "points": _normalize_points(
@@ -314,14 +329,9 @@ def _normalize_flat_finding(finding: dict[str, Any], chart_id: str, index: int) 
         ),
         "sample": {
             "sample_id": sample_id,
-            "sample_display_name": finding.get("sample_display_name") or sample_id,
-            "sample_composition": (
-                finding.get("sample_composition")
-                or finding.get("formulation_alias")
-                or finding.get("formulation")
-                or finding.get("sample_description")
-            ),
-            "evidence_text": evidence_text,
+            "sample_display_name": display_name,
+            "sample_composition": composition,
+            "evidence_text": evidence_text or fibre_evidence_text,
             "evidence_source": finding.get("evidence_source") or "llm_text_extraction",
             "confidence": finding.get("confidence") or "medium",
         },
@@ -329,6 +339,28 @@ def _normalize_flat_finding(finding: dict[str, Any], chart_id: str, index: int) 
         "confidence": finding.get("confidence") or "medium",
         "warnings": list(finding.get("warnings") or []) + ["normalized from flat LLM output"],
     }
+
+
+def _legacy_sample_id(finding: dict[str, Any]) -> str | None:
+    label = _legacy_sample_label(finding)
+    if not label:
+        return None
+    return re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_") or None
+
+
+def _legacy_sample_label(finding: dict[str, Any]) -> str | None:
+    polymer = str(finding.get("polymer_type") or "").strip()
+    additive = str(finding.get("additive_type") or "").strip()
+    polymer_concentration = finding.get("polymer_concentration")
+    additive_concentration = finding.get("additive_concentration")
+    polymer_unit = str(finding.get("polymer_concentration_unit") or "").strip()
+    additive_unit = str(finding.get("additive_concentration_unit") or "").strip()
+    parts = []
+    if polymer:
+        parts.append(f"{polymer} {polymer_concentration:g} {polymer_unit}" if isinstance(polymer_concentration, (int, float)) else polymer)
+    if additive:
+        parts.append(f"{additive} {additive_concentration:g} {additive_unit}" if isinstance(additive_concentration, (int, float)) else additive)
+    return ", ".join(parts) or None
 
 
 def _normalize_top_level_fibre_outcomes(payload: dict[str, Any]) -> list[dict[str, Any]]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from collections import defaultdict
 from pathlib import Path
 
@@ -198,6 +199,7 @@ def _flatten_reviews(reviews_by_paper: dict[str, list[ReviewCandidate]], papers:
 def _finding_results(extractions, paper: SourcePaper) -> list[JoinedResult]:
     results: list[JoinedResult] = []
     for extraction in extractions:
+        is_single_series_chart = len(extraction.findings) == 1
         for finding in extraction.findings:
             series = DigitizedSeries(
                 curve_id=finding.curve_id,
@@ -211,7 +213,11 @@ def _finding_results(extractions, paper: SourcePaper) -> list[JoinedResult]:
             warnings = list(finding.warnings) + series_quality_warnings(series, x_axis_label=finding.x_axis_label)
             if not finding.sample.evidence_text:
                 warnings.append("sample link lacks direct evidence")
-            if not finding.curve_visual_label and not finding.curve_legend_text:
+            if (
+                not finding.curve_visual_label
+                and not finding.curve_legend_text
+                and not (is_single_series_chart and finding.sample.evidence_text)
+            ):
                 warnings.append("curve lacks a visual or legend identifier")
 
             confidence = finding.confidence
@@ -287,6 +293,7 @@ def run_pipeline(
     use_docling_figures: bool = True,
     successful_fibres_only: bool = False,
     screen_reviews: bool = True,
+    should_pause: Callable[[], bool] | None = None,
 ) -> list[JoinedResult]:
     papers = discover_pdfs(pdf_dir)
     if max_papers is not None:
@@ -301,6 +308,7 @@ def run_pipeline(
         use_docling_figures=use_docling_figures,
         successful_fibres_only=successful_fibres_only,
         screen_reviews=screen_reviews,
+        should_pause=should_pause,
     )
 
 
@@ -311,6 +319,7 @@ def resume_pipeline(
     use_docling_figures: bool = True,
     successful_fibres_only: bool = False,
     screen_reviews: bool = True,
+    should_pause: Callable[[], bool] | None = None,
 ) -> list[JoinedResult]:
     manifest = load_manifest(out_dir)
     papers = [
@@ -330,6 +339,7 @@ def resume_pipeline(
         use_docling_figures=use_docling_figures,
         successful_fibres_only=successful_fibres_only,
         screen_reviews=screen_reviews,
+        should_pause=should_pause,
     )
 
 
@@ -343,6 +353,7 @@ def _run_papers(
     use_docling_figures: bool,
     successful_fibres_only: bool,
     screen_reviews: bool,
+    should_pause: Callable[[], bool] | None,
 ) -> list[JoinedResult]:
     load_dotenv()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -376,6 +387,8 @@ def _run_papers(
                     for item in json.loads((paper_dir / "results.json").read_text(encoding="utf-8"))
                 ]
             continue
+        if should_pause and should_pause():
+            break
 
         llm_dir.mkdir(parents=True, exist_ok=True)
         status = {

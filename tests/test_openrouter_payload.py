@@ -143,6 +143,34 @@ def test_normalizes_flat_chart_payload_with_data_points_and_sample_description()
     assert finding["sample"]["sample_composition"] == "Sample A in water"
 
 
+def test_normalizes_legacy_json_array_with_axis_and_fibre_evidence_aliases():
+    payload = [
+        {
+            "figure_id": "Figure 2",
+            "polymer_type": "PEO",
+            "polymer_concentration": 4,
+            "polymer_concentration_unit": "wt%",
+            "additive_type": "MWNT",
+            "additive_concentration": 1,
+            "additive_concentration_unit": "wt%",
+            "x_axis_name": "Shear rate",
+            "y_axis_name": "Viscosity",
+            "points": [[1, 100], [10, 30], [100, 8]],
+            "fibre_outcome": "fibre_formation",
+            "fibre_outcome_evidence": "The 4 wt% PEO with 1 wt% MWNT sample formed fibres.",
+        }
+    ]
+
+    normalized = normalize_extraction_payload(payload, paper_id="paper_0004", source_pdf="paper.pdf")
+
+    finding = normalized["findings"][0]
+    assert finding["curve_legend_text"] == "PEO 4 wt%, MWNT 1 wt%"
+    assert finding["x_axis_label"] == "Shear rate"
+    assert finding["y_axis_label"] == "Viscosity"
+    assert finding["fibre_outcome"]["outcome"] == "formed fibres"
+    assert finding["fibre_outcome"]["evidence_text"].startswith("The 4 wt%")
+
+
 def test_assigns_the_attached_page_and_crop_to_unannotated_findings():
     payload = {
         "paper_id": "paper_0003",

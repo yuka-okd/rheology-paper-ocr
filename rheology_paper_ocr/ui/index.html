@@ -80,6 +80,16 @@
       <button id="start-upload" class="primary wide" value="default">Start extraction</button>
     </form>
   </dialog>
+  <dialog id="resume-dialog">
+    <form id="resume-form" method="dialog">
+      <div class="dialog-header"><div><div class="eyebrow">Resume extraction</div><h2>Continue local run</h2></div><button value="cancel" class="close" title="Close">×</button></div>
+      <label class="field-label" for="resume-api-key">OpenRouter API key</label>
+      <input id="resume-api-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-or-v1-...">
+      <label class="remember-key"><input id="resume-remember-key" type="checkbox"> <span>Remember on this device</span></label>
+      <div id="resume-error" class="form-error hidden"></div>
+      <button id="resume-submit" class="primary wide" value="default">Resume run</button>
+    </form>
+  </dialog>
   <script src="/static/app.js"></script>
 </body>
 </html>

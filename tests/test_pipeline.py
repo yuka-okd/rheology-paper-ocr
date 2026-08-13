@@ -5,7 +5,7 @@ import rheology_paper_ocr.pipeline as pipeline
 from rheology_paper_ocr.docling_figures import LocalizedFigure
 from rheology_paper_ocr.openrouter_client import OpenRouterInsufficientCreditsError
 from rheology_paper_ocr.pipeline import _extraction_requests, completion_status, is_review_article, load_saved_results, run_pipeline
-from rheology_paper_ocr.schemas import DataPoint, ExtractedFinding, FibreOutcome, JoinedResult, PaperLLMExtraction, SampleLink
+from rheology_paper_ocr.schemas import DataPoint, ExtractedFinding, FibreOutcome, JoinedResult, PaperLLMExtraction, SampleLink, SourcePaper
 
 
 def test_completion_status_flags_relevant_paper_with_no_findings():
@@ -132,6 +132,34 @@ def test_empty_pipeline_writes_empty_reports_without_openrouter(monkeypatch, tmp
     assert run_pipeline(tmp_path, tmp_path / "output") == []
     assert (tmp_path / "output" / "results.json").exists()
     assert (tmp_path / "output" / "report.html").exists()
+
+
+def test_pipeline_honours_pause_before_starting_the_next_paper(monkeypatch, tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "paper.pdf").write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(pipeline, "OpenRouterClient", lambda model=None: object())
+
+    assert run_pipeline(source_dir, tmp_path / "output", should_pause=lambda: True) == []
+    assert json.loads((tmp_path / "output" / "manifest.json").read_text(encoding="utf-8")) == []
+
+
+def test_single_series_chart_with_caption_evidence_does_not_require_a_legend():
+    extraction = PaperLLMExtraction(
+        paper_id="paper_0001",
+        source_pdf="paper.pdf",
+        has_rheology_chart=True,
+        findings=[
+            ExtractedFinding(
+                curve_id="sample_a",
+                sample=SampleLink(sample_id="sample_a", evidence_text="Figure 2 is the Sample A series."),
+            )
+        ],
+    )
+
+    result = pipeline._finding_results([extraction], SourcePaper(paper_id="paper_0001", path=Path("paper.pdf")))[0]
+
+    assert "curve lacks a visual or legend identifier" not in result.warnings
 
 
 def test_uses_a_figure_crop_when_docling_identifies_a_chart(tmp_path: Path):

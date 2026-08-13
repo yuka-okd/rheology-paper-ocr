@@ -61,6 +61,13 @@ class LocalRunStore:
                 (status, error, completed_at, run_id),
             )
 
+    def pause_orphaned_runs(self) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE runs SET status = 'paused', error = ? WHERE status = 'running'",
+                ("Paused because the local server restarted.",),
+            )
+
     def save_decision(self, run_id: str, curve_id: str, figure_id: str | None, decision: str, note: str | None) -> dict:
         updated_at = _now()
         with self._connect() as connection:

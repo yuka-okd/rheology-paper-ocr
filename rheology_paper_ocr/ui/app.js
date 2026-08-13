@@ -1,4 +1,4 @@
-const state = { runs: [], detail: null, selectedRunId: null, filter: 'all', selectedRow: null, poll: null };
+const state = { runs: [], detail: null, selectedRunId: null, filter: 'all', selectedRow: null, poll: null, resumeRunId: null };
 const $ = (selector) => document.querySelector(selector);
 const apiKeyStorageKey = 'rheology-evidence.openrouter-api-key';
 
@@ -22,10 +22,14 @@ async function loadRuns() {
   if (!state.runs.length) showEmpty();
 }
 
+function runAction(run) { if (run.status === 'running') return `<button class="run-action" data-pause-run="${run.id}">Pause</button>`; if (run.status === 'paused') return `<button class="run-action" data-resume-run="${run.id}">Resume</button>`; return ''; }
+
 function renderRuns() {
-  $('#run-list').innerHTML = state.runs.map(run => `<div class="run-entry ${run.id === state.selectedRunId ? 'active' : ''}"><button class="run-item" data-run="${run.id}"><strong>${escape(run.name)}</strong><span>${run.completed_papers}/${run.paper_count} papers · ${escape(run.status)}</span></button><button class="delete-run" data-delete-run="${run.id}" ${run.status === 'running' ? 'disabled' : ''} title="${run.status === 'running' ? 'Cannot delete an active run' : 'Delete run'}">Delete</button></div>`).join('');
+  $('#run-list').innerHTML = state.runs.map(run => `<div class="run-entry ${run.id === state.selectedRunId ? 'active' : ''}"><button class="run-item" data-run="${run.id}"><strong>${escape(run.name)}</strong><span>${run.completed_papers}/${run.paper_count} papers · ${escape(run.status)}</span></button><div class="run-controls">${runAction(run)}<button class="delete-run" data-delete-run="${run.id}" ${run.status === 'running' ? 'disabled' : ''} title="${run.status === 'running' ? 'Pause an active run before deleting it' : 'Delete run'}">Delete</button></div></div>`).join('');
   document.querySelectorAll('[data-run]').forEach(button => button.addEventListener('click', () => selectRun(button.dataset.run)));
   document.querySelectorAll('[data-delete-run]').forEach(button => button.addEventListener('click', () => deleteRun(button.dataset.deleteRun)));
+  document.querySelectorAll('[data-pause-run]').forEach(button => button.addEventListener('click', () => pauseRun(button.dataset.pauseRun)));
+  document.querySelectorAll('[data-resume-run]').forEach(button => button.addEventListener('click', () => requestResume(button.dataset.resumeRun)));
 }
 
 async function selectRun(id) {
@@ -45,7 +49,7 @@ function renderDetail() {
   $('#run-title').textContent = run.name; $('#run-subtitle').textContent = `${run.completed_papers}/${run.paper_count} papers completed`;
   $('#csv-export').href = state.detail.export_csv_url; $('#print-export').href = state.detail.print_url;
   const status = $('#status-banner'); status.className = 'status-banner';
-  status.textContent = run.error || ({ ready: 'Ready to extract.', running: 'Extraction is running locally. This view refreshes automatically.', completed: 'Extraction completed. Review rows before export.', blocked: 'Extraction paused because provider credit is exhausted.', failed: 'Extraction failed. Inspect the run details.' }[run.status] || run.status);
+  status.textContent = run.error || ({ ready: 'Ready to extract.', running: 'Extraction is running locally. This view refreshes automatically.', paused: 'Extraction is paused. Resume it from the run list.', completed: 'Extraction completed. Review rows before export.', blocked: 'Extraction paused because provider credit is exhausted.', failed: 'Extraction failed. Inspect the run details.' }[run.status] || run.status);
   if (['blocked', 'failed'].includes(run.status)) status.classList.add('error'); else if (run.status === 'running' || review_queue.length) status.classList.add('warning');
   renderProgress(run, progress);
   const decisions = results.map(effectiveDecision);
@@ -104,6 +108,30 @@ async function deleteRun(runId) {
   } catch (err) { window.alert(err.message); }
 }
 
+async function pauseRun(runId) {
+  try { await api(`/api/runs/${runId}/pause`, { method:'POST' }); await selectRun(runId); }
+  catch (err) { window.alert(err.message); }
+}
+
+async function resumeRun(runId, apiKey) {
+  try {
+    await api(`/api/runs/${runId}/resume`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({api_key:apiKey}) });
+    $('#resume-dialog').close();
+    state.resumeRunId = null;
+    await selectRun(runId);
+  } catch (err) { $('#resume-error').textContent = err.message; $('#resume-error').classList.remove('hidden'); }
+}
+
+function requestResume(runId) {
+  const savedKey = localStorage.getItem(apiKeyStorageKey);
+  if (savedKey) { resumeRun(runId, savedKey); return; }
+  state.resumeRunId = runId;
+  $('#resume-error').classList.add('hidden');
+  $('#resume-api-key').value = '';
+  $('#resume-remember-key').checked = false;
+  $('#resume-dialog').showModal();
+}
+
 async function createRun(event) {
   event.preventDefault();
   if (event.submitter?.value === 'cancel') { $('#upload-dialog').close(); return; }
@@ -126,6 +154,7 @@ const dropzone = $('.dropzone');
 ['dragleave', 'drop'].forEach(type => dropzone.addEventListener(type, event => { event.preventDefault(); dropzone.classList.remove('dragging'); }));
 dropzone.addEventListener('drop', event => { if (!event.dataTransfer?.files.length) return; $('#pdf-files').files = event.dataTransfer.files; updateFileCount(event.dataTransfer.files); });
 const savedApiKey = localStorage.getItem(apiKeyStorageKey); if (savedApiKey) { $('#openrouter-key').value = savedApiKey; $('#remember-key').checked = true; }
+$('#resume-form').addEventListener('submit', event => { event.preventDefault(); if (event.submitter?.value === 'cancel') { $('#resume-dialog').close(); return; } const apiKey = $('#resume-api-key').value.trim(); if (!apiKey) { $('#resume-error').textContent = 'Enter an OpenRouter API key to resume extraction.'; $('#resume-error').classList.remove('hidden'); $('#resume-api-key').focus(); return; } if ($('#resume-remember-key').checked) localStorage.setItem(apiKeyStorageKey, apiKey); resumeRun(state.resumeRunId, apiKey); });
 $('#close-review').addEventListener('click', () => $('#review-panel').classList.add('hidden')); document.querySelectorAll('[data-decision]').forEach(button => button.addEventListener('click', () => saveDecision(button.dataset.decision)));
 document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => { document.querySelectorAll('.tab').forEach(item => item.classList.remove('active')); tab.classList.add('active'); state.filter = tab.dataset.filter; renderTable(); }));
 loadRuns().catch(error => { console.error(error); $('#run-subtitle').textContent = error.message; });

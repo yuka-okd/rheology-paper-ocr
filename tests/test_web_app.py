@@ -147,8 +147,8 @@ def test_existing_browser_run_resumes_completed_papers(tmp_path: Path, monkeypat
     (output_dir / "manifest.json").write_text("[]", encoding="utf-8")
     seen = {}
 
-    def fake_pipeline(input_dir, pipeline_output_dir, api_key=None, resume=False):
-        seen.update(input_dir=input_dir, output_dir=pipeline_output_dir, api_key=api_key, resume=resume)
+    def fake_pipeline(input_dir, pipeline_output_dir, api_key=None, resume=False, should_pause=None):
+        seen.update(input_dir=input_dir, output_dir=pipeline_output_dir, api_key=api_key, resume=resume, should_pause=should_pause)
         return []
 
     monkeypatch.setattr(web_app, "run_pipeline", fake_pipeline)
@@ -185,6 +185,50 @@ def test_browser_api_key_is_passed_only_to_the_in_memory_job(tmp_path: Path, mon
     assert started.status_code == 200
     assert seen["api_key"] == key
     assert key.encode() not in (tmp_path / "sessions.sqlite3").read_bytes()
+
+
+def test_browser_pause_and_resume_run(tmp_path: Path, monkeypatch):
+    client = TestClient(create_app(tmp_path))
+    created = client.post(
+        "/api/runs",
+        files=[("files", ("paper.pdf", b"%PDF-1.4\n", "application/pdf"))],
+    )
+    run_id = created.json()["run"]["id"]
+    LocalRunStore(tmp_path).update_status(run_id, "running")
+    paused = client.post(f"/api/runs/{run_id}/pause")
+    seen = {}
+
+    def fake_job(store, resumed_run_id, api_key):
+        seen.update(run_id=resumed_run_id, api_key=api_key)
+
+    class ImmediateThread:
+        def __init__(self, *, target, args, daemon):
+            self.target = target
+            self.args = args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(web_app, "_run_job", fake_job)
+    monkeypatch.setattr(web_app.threading, "Thread", ImmediateThread)
+    resumed = client.post(f"/api/runs/{run_id}/resume", json={"api_key": "resume-key"})
+
+    assert paused.status_code == 200
+    assert paused.json()["status"] == "paused"
+    assert resumed.status_code == 200
+    assert seen == {"run_id": run_id, "api_key": "resume-key"}
+
+
+def test_browser_startup_pauses_orphaned_runs(tmp_path: Path):
+    store = LocalRunStore(tmp_path)
+    run = store.create_run("Interrupted")
+    store.update_status(run["id"], "running")
+
+    create_app(tmp_path)
+
+    restored = LocalRunStore(tmp_path).get_run(run["id"])
+    assert restored["status"] == "paused"
+    assert "server restarted" in restored["error"]
 
 
 def test_browser_run_requires_an_explicit_api_key(tmp_path: Path):

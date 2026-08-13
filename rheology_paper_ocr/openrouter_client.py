@@ -56,7 +56,7 @@ def build_chat_payload(
     return payload
 
 
-def parse_json_response(content: str) -> dict[str, Any]:
+def parse_json_response(content: str) -> dict[str, Any] | list[Any]:
     stripped = content.strip()
     if stripped.startswith("```"):
         lines = [line for line in stripped.splitlines() if not line.strip().startswith("```")]
@@ -85,7 +85,12 @@ class OpenRouterClient:
         self.last_model_used: str | None = None
         self.last_attempts: list[dict[str, str]] = []
 
-    def extract(self, prompt: str, image_paths: list[Path], raw_response_path: Path | None = None) -> dict[str, Any]:
+    def extract(
+        self,
+        prompt: str,
+        image_paths: list[Path],
+        raw_response_path: Path | None = None,
+    ) -> dict[str, Any] | list[Any]:
         self.last_model_used = None
         self.last_attempts = []
         try:
@@ -119,7 +124,7 @@ class OpenRouterClient:
         prompt: str,
         image_paths: list[Path],
         raw_response_path: Path | None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | list[Any]:
         payload = build_chat_payload(model, prompt, image_paths, use_schema=True, max_tokens=self.max_tokens)
         response = self._post_chat_with_retries(payload)
         data = response.json()
