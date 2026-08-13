@@ -4,7 +4,14 @@ import httpx
 import pytest
 
 from rheology_paper_ocr.openrouter_client import build_chat_payload
-from rheology_paper_ocr.extract_with_llm import build_extraction_prompt, normalize_extraction_payload
+from rheology_paper_ocr.extract_with_llm import (
+    build_digitization_repair_prompt,
+    build_extraction_prompt,
+    merge_digitization_repair,
+    normalize_extraction_payload,
+    select_prompt_context,
+)
+from rheology_paper_ocr.schemas import DataPoint, ExtractedFinding, PaperLLMExtraction
 from rheology_paper_ocr.openrouter_client import OpenRouterClient, OpenRouterInsufficientCreditsError
 
 
@@ -20,6 +27,7 @@ def test_builds_json_schema_vision_payload(tmp_path: Path):
 
     assert payload["model"] == "anthropic/claude-sonnet-4.6"
     assert payload["max_tokens"] == 3000
+    assert payload["reasoning"] == {"effort": "low", "exclude": True}
     assert payload["response_format"]["type"] == "json_schema"
     content = payload["messages"][0]["content"]
     assert content[0]["type"] == "text"
@@ -202,6 +210,7 @@ def test_target_figure_prompt_limits_a_crop_pass_to_the_localized_figure():
 
     assert "The target figure is Figure 2" in prompt
     assert "Extract only this figure" in prompt
+    assert "return every distinct series" in prompt
 
 
 def test_prompt_includes_deterministic_chart_geometry():
@@ -220,6 +229,13 @@ def test_prompt_requires_the_endpoint_after_a_broken_axis():
     prompt = build_extraction_prompt("paper_0003", "paper.pdf", "Figure 2 has a broken time axis.")
 
     assert "far-right point as the end" in prompt
+
+
+def test_prompt_keeps_concentration_viscosity_charts_in_scope():
+    prompt = build_extraction_prompt("paper_0003", "paper.pdf", "Figure 2 plots specific viscosity by concentration.")
+
+    assert "concentration-viscosity charts" in prompt
+    assert "is in scope" in prompt
 
 
 def test_successful_fibres_only_prompt_omits_non_successful_series():
@@ -593,6 +609,56 @@ def test_prompt_includes_relevant_late_rheology_context():
     assert "Intro only." in prompt
     assert "Fig. 2 shows viscosity" in prompt
     assert len(prompt) < len(text) + 2700
+
+
+def test_targeted_context_keeps_the_selected_page_and_figure_references():
+    text = (
+        "--- Page 1 ---\n" + ("electrospinning background\n" * 1200) +
+        "--- Page 2 ---\nFigure 2. Diamond is Sample A and square is Sample B.\n" +
+        ("page two detail\n" * 200) +
+        "--- Page 3 ---\nFigure 2 confirms Sample A formed fibres."
+    )
+
+    context = select_prompt_context(text, attached_page=2, target_figure_id="Figure 2")
+
+    assert "Diamond is Sample A" in context
+    assert "Sample A formed fibres" in context
+
+
+def test_digitization_repair_prompt_targets_existing_series_and_requires_points():
+    prompt = build_digitization_repair_prompt(
+        "paper_0001",
+        "paper.pdf",
+        "Figure 2",
+        "Figure 2. Viscosity against concentration.",
+        [ExtractedFinding(curve_id="curve_a", curve_visual_label="open diamond", curve_legend_text="Sample A")],
+    )
+
+    assert "`curve_a`" in prompt
+    assert "exactly three approximate visible points" in prompt
+
+
+def test_digitization_repair_only_replaces_series_with_usable_points():
+    extraction = PaperLLMExtraction(
+        paper_id="paper_0001",
+        source_pdf="paper.pdf",
+        has_rheology_chart=True,
+        findings=[ExtractedFinding(curve_id="curve_a"), ExtractedFinding(curve_id="curve_b")],
+    )
+    repair = PaperLLMExtraction(
+        paper_id="paper_0001",
+        source_pdf="paper.pdf",
+        has_rheology_chart=True,
+        findings=[
+            ExtractedFinding(curve_id="curve_a", points=[DataPoint(x=1, y=10), DataPoint(x=10, y=1)]),
+            ExtractedFinding(curve_id="curve_b", points=[]),
+        ],
+    )
+
+    merged = merge_digitization_repair(extraction, repair)
+
+    assert len(merged.findings[0].points) == 2
+    assert merged.findings[1].points == []
 
 
 def test_normalizes_top_level_fibre_outcomes_without_dropping_evidence():

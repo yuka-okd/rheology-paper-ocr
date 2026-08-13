@@ -7,7 +7,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from rheology_paper_ocr.extract_with_llm import extract_paper_with_llm
+from rheology_paper_ocr.extract_with_llm import extract_paper_with_llm, merge_digitization_repair
 from rheology_paper_ocr.chart_geometry import analyze_chart_geometry
 from rheology_paper_ocr.docling_figures import (
     DoclingFigureError,
@@ -449,7 +449,12 @@ def _run_papers(
                 chart_crop_path = None if image_path is None else _relative_to_run(image_path, out_dir)
                 if target_figure is not None:
                     attached_images.append(target_figure.crop_path)
-                    chart_crop_path = _relative_to_run(target_figure.crop_path, out_dir)
+                    if target_figure.evidence_crop_path:
+                        attached_images.append(target_figure.evidence_crop_path)
+                    chart_crop_path = _relative_to_run(
+                        target_figure.evidence_crop_path or target_figure.crop_path,
+                        out_dir,
+                    )
                     if target_figure.native_graphic_path and target_figure.native_graphic_path != target_figure.crop_path:
                         attached_images.append(target_figure.native_graphic_path)
                 chart_geometry = None
@@ -476,6 +481,26 @@ def _run_papers(
                     successful_fibres_only=successful_fibres_only,
                     chart_geometry=chart_geometry,
                 )
+                missing_points = [finding for finding in extraction.findings if len(finding.points) < 3]
+                if target_figure is not None and missing_points:
+                    repair = extract_paper_with_llm(
+                        client,
+                        paper.paper_id,
+                        str(paper.path),
+                        text,
+                        attached_images,
+                        raw_response_path=llm_dir / f"{page_suffix}_digitization_repair_raw_response.json",
+                        page_number=_page_number(image_path),
+                        chart_crop_path=chart_crop_path,
+                        target_figure_id=target_figure.figure_id,
+                        target_figure_caption=target_figure.caption,
+                        digitization_repair_for=missing_points,
+                    )
+                    (llm_dir / f"{page_suffix}_digitization_repair.json").write_text(
+                        repair.model_dump_json(indent=2),
+                        encoding="utf-8",
+                    )
+                    extraction = merge_digitization_repair(extraction, repair)
                 (llm_dir / f"{page_suffix}_extraction.json").write_text(
                     extraction.model_dump_json(indent=2),
                     encoding="utf-8",

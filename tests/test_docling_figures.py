@@ -4,6 +4,7 @@ import fitz
 
 from rheology_paper_ocr.docling_figures import (
     LocalizedFigure,
+    _caption_rect_for_figure,
     _caption_for_picture,
     _figure_id,
     _localized_figures_from_document,
@@ -98,8 +99,29 @@ def test_renders_docling_picture_bbox_on_original_page(tmp_path: Path):
     assert figures[0].figure_id == "Figure 2"
     assert figures[0].relevance_score > 0
     assert figures[0].crop_path.exists()
+    assert figures[0].evidence_crop_path is None
     assert figures[0].vector_text is not None
     assert figures[0].picture_type == "line_chart"
+
+
+def test_finds_the_caption_below_a_figure_instead_of_a_body_reference(tmp_path: Path):
+    source_path = tmp_path / "source.pdf"
+    source = fitz.open()
+    page = source.new_page(width=300, height=400)
+    figure_rect = fitz.Rect(60, 80, 240, 230)
+    page.draw_rect(figure_rect, color=(0, 0, 0))
+    page.insert_text((60, 60), "Figure 2 is discussed in the text above.")
+    page.insert_textbox(fitz.Rect(60, 245, 240, 285), "Figure 2. Diamond is Sample A; square is Sample B.")
+    source.save(source_path)
+    source.close()
+
+    document = fitz.open(source_path)
+    source_page = document[0]
+    caption_rect = _caption_rect_for_figure(source_page, figure_rect, "Figure 2")
+    document.close()
+
+    assert caption_rect is not None
+    assert caption_rect.y0 >= figure_rect.y1
 
 
 def test_native_caption_uses_only_the_caption_sentence_and_normalizes_ligatures():

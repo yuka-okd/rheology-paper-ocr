@@ -60,11 +60,13 @@ class LocalizedFigure:
     picture_type: str | None = None
     picture_type_confidence: float | None = None
     native_graphic_path: Path | None = None
+    evidence_crop_path: Path | None = None
 
     def to_dict(self) -> dict:
         data = asdict(self)
         data["crop_path"] = str(self.crop_path)
         data["native_graphic_path"] = None if self.native_graphic_path is None else str(self.native_graphic_path)
+        data["evidence_crop_path"] = None if self.evidence_crop_path is None else str(self.evidence_crop_path)
         data["rheology_candidate"] = self.is_rheology_candidate
         data["exclusion_reason"] = self.exclusion_reason
         return data
@@ -252,6 +254,13 @@ def _localized_figures_from_document(
             source_page = source[page - 1]
             clip = _crop_rect(source_page, coords)
             _render_crop(source_page, clip, crop_path, render_scale)
+            evidence_crop_path = _render_caption_evidence_crop(
+                source_page,
+                clip,
+                figure_id,
+                figures_dir / f"page_{page:03d}_{suffix}_evidence.png",
+                render_scale,
+            )
             localized.append(
                 LocalizedFigure(
                     figure_id=figure_id,
@@ -270,6 +279,7 @@ def _localized_figures_from_document(
                         figures_dir,
                         figure_id,
                     ),
+                    evidence_crop_path=evidence_crop_path,
                 )
             )
     finally:
@@ -390,6 +400,63 @@ def _render_crop(page: fitz.Page, clip: fitz.Rect, target: Path, scale: float) -
     target.parent.mkdir(parents=True, exist_ok=True)
     pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=clip, alpha=False)
     pixmap.save(target)
+
+
+def _render_caption_evidence_crop(
+    page: fitz.Page,
+    figure_clip: fitz.Rect,
+    figure_id: str | None,
+    target: Path,
+    scale: float,
+) -> Path | None:
+    """Render a chart and its caption together when the caption is detectable.
+
+    Chart crops are intentionally tight for digitization, but many papers encode
+    marker-to-sample mappings only in the figure caption. The evidence crop
+    retains those glyphs at useful resolution without asking vision to read an
+    entire journal page.
+    """
+    caption_rect = _caption_rect_for_figure(page, figure_clip, figure_id)
+    if caption_rect is None:
+        return None
+    evidence_rect = figure_clip | caption_rect
+    padding = 6.0
+    evidence_rect = fitz.Rect(
+        max(page.rect.x0, evidence_rect.x0 - padding),
+        max(page.rect.y0, evidence_rect.y0 - padding),
+        min(page.rect.x1, evidence_rect.x1 + padding),
+        min(page.rect.y1, evidence_rect.y1 + padding),
+    )
+    _render_crop(page, evidence_rect, target, scale)
+    return target
+
+
+def _caption_rect_for_figure(page: fitz.Page, figure_clip: fitz.Rect, figure_id: str | None) -> fitz.Rect | None:
+    if not figure_id:
+        return None
+    number = re.search(r"\b(\d+[a-z]?)\b", figure_id, flags=re.IGNORECASE)
+    if not number:
+        return None
+    marker = re.compile(rf"\b(?:figure|fig\.)\s*{re.escape(number.group(1))}\b", re.IGNORECASE)
+    candidates: list[fitz.Rect] = []
+    for block in page.get_text("blocks"):
+        if len(block) < 5 or not marker.search(str(block[4])):
+            continue
+        candidates.append(fitz.Rect(block[:4]))
+    if not candidates:
+        return None
+
+    def rank(rect: fitz.Rect) -> tuple[int, float, float]:
+        vertical_gap = max(rect.y0 - figure_clip.y1, figure_clip.y0 - rect.y1, 0.0)
+        below_or_aligned = 0 if rect.y0 >= figure_clip.y1 - 12 else 1
+        horizontal_gap = abs(rect.x0 + rect.x1 - figure_clip.x0 - figure_clip.x1)
+        return below_or_aligned, vertical_gap, horizontal_gap
+
+    caption_rect = min(candidates, key=rank)
+    vertical_gap = max(caption_rect.y0 - figure_clip.y1, figure_clip.y0 - caption_rect.y1, 0.0)
+    if vertical_gap > max(144.0, page.rect.height * 0.28):
+        return None
+    return caption_rect
 
 
 def _extract_vector_text(page: fitz.Page, clip: fitz.Rect, max_chars: int = 3000) -> str | None:

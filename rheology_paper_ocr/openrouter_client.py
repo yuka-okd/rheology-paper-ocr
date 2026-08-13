@@ -31,6 +31,7 @@ def build_chat_payload(
     image_paths: list[Path],
     use_schema: bool = True,
     max_tokens: int = 3000,
+    reasoning_effort: str = "low",
 ) -> dict[str, Any]:
     content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
     for path in image_paths:
@@ -41,6 +42,9 @@ def build_chat_payload(
         "messages": [{"role": "user", "content": content}],
         "temperature": 0,
         "max_tokens": max_tokens,
+        # Structured chart extraction needs enough output budget for several
+        # series. Keep Gemini thinking available but bounded at the gateway.
+        "reasoning": {"effort": reasoning_effort, "exclude": True},
     }
     if use_schema:
         payload["response_format"] = {

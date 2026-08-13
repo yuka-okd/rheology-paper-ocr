@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from rheology_paper_ocr.openrouter_client import OpenRouterClient
-from rheology_paper_ocr.schemas import PaperLLMExtraction
+from rheology_paper_ocr.schemas import ExtractedFinding, PaperLLMExtraction
 
 
 CONTEXT_KEYWORDS = (
@@ -27,11 +27,29 @@ CONTEXT_KEYWORDS = (
 )
 
 
-def select_prompt_context(text: str, max_chars: int = 18000) -> str:
+def select_prompt_context(
+    text: str,
+    max_chars: int = 18000,
+    attached_page: int | None = None,
+    target_figure_id: str | None = None,
+) -> str:
     if len(text) <= max_chars:
         return text
 
-    windows: list[tuple[int, int]] = [(0, min(4000, len(text)))]
+    windows: list[tuple[int, int]] = []
+    if attached_page is not None:
+        page_match = re.search(rf"--- Page {attached_page} ---", text)
+        if page_match:
+            next_page = re.search(r"--- Page \d+ ---", text[page_match.end() :])
+            page_end = page_match.end() + next_page.start() if next_page else len(text)
+            windows.append((page_match.start(), min(page_end, page_match.start() + 6000)))
+    if target_figure_id:
+        number = re.search(r"\b(\d+[a-z]?)\b", target_figure_id, flags=re.IGNORECASE)
+        if number:
+            pattern = re.compile(rf"\b(?:figure|fig\.)\s*{re.escape(number.group(1))}\b", re.IGNORECASE)
+            for match in list(pattern.finditer(text))[:4]:
+                windows.append((max(0, match.start() - 1100), min(len(text), match.end() + 1800)))
+    windows.append((0, min(4000, len(text))))
     lowered = text.lower()
     for keyword in CONTEXT_KEYWORDS:
         start = 0
@@ -43,11 +61,17 @@ def select_prompt_context(text: str, max_chars: int = 18000) -> str:
             start = index + len(keyword)
 
     merged: list[tuple[int, int]] = []
-    for start, end in sorted(windows):
-        if not merged or start > merged[-1][1] + 200:
+    for start, end in windows:
+        overlapping = [index for index, window in enumerate(merged) if start <= window[1] + 200 and end >= window[0] - 200]
+        if not overlapping:
             merged.append((start, end))
-        else:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            continue
+        first = min(overlapping)
+        start = min([start] + [merged[index][0] for index in overlapping])
+        end = max([end] + [merged[index][1] for index in overlapping])
+        merged[first] = (start, end)
+        for index in reversed(overlapping[1:]):
+            del merged[index]
 
     chunks = []
     used = 0
@@ -72,16 +96,21 @@ def build_extraction_prompt(
     successful_fibres_only: bool = False,
     chart_geometry: dict[str, Any] | None = None,
 ) -> str:
-    clipped_text = select_prompt_context(text)
+    clipped_text = select_prompt_context(
+        text,
+        attached_page=attached_page,
+        target_figure_id=target_figure_id,
+    )
     mode_instruction = (
         "This is a text-only pass. Identify rheology figures and fibre outcomes from text, captions, and tables only. "
         "Do not invent chart points; leave points empty when chart data cannot be read from text."
         if text_only
-        else "Use the attached page image to inspect one candidate chart page. If several images are attached, they show the same page: use the full page for context and any magnified detail crop or native embedded graphic for marker-to-legend mapping and point digitization."
+        else "Use the attached images to inspect one candidate chart page. They can include the full page, a magnified chart crop, a chart-plus-caption evidence crop, and an embedded native graphic. Use the chart-plus-caption crop for marker-to-sample mapping and the chart crop or native graphic for point digitization."
     )
     target_instruction = (
         f"The target figure is {target_figure_id or 'the supplied crop'}. Its caption is: {target_figure_caption or 'not available'}. "
-        "The final attached image is an exact crop of this target figure. Extract only this figure, not other charts visible in the full-page context image."
+        "It was selected by deterministic chart localization: when it is visible, set `has_rheology_chart=true` and return every distinct series. "
+        "Do not return an empty finding set solely because this is a concentration-viscosity chart. Extract only this figure, not other charts visible in the full-page context image."
         if target_figure_id or target_figure_caption
         else ""
     )
@@ -111,13 +140,13 @@ Rules:
 - When an image is attached, only report charts visible on that page and set page to the attached page number.
 - Set x_axis_scale and y_axis_scale to "linear", "log", or "unclear". Keep points in ascending x order.
 - Return the flat finding schema directly. Do not wrap findings in a chart object or add figure captions, chart type, or trend prose.
-- Report only shear viscosity/stress, modulus, frequency-sweep, or flow curves.
+- Report bulk shear viscosity/stress, modulus, frequency-sweep, flow curves, and concentration-viscosity charts.
 - Exclude extensional, capillary-breakup, and filament-thinning plots.
 - Treat an axis labelled "strain rate" or "extension rate" as out of scope unless it explicitly says "shear rate".
 - Digitize at most three approximate points per series: start, turning point, and end.
 - On a broken x axis, use the far-right point as the end.
 - `color_traces` only cross-check count/direction, never values or legend mappings.
-- A concentration-viscosity plot is not a flow curve or shear-thickening.
+- A concentration-viscosity chart is in scope, but is not a flow curve or shear-thickening.
 - Map each line to the sample/formulation using legend, caption, nearby text, methods, or tables. For a single-series chart with no legend, use its specific caption formulation as `curve_legend_text` and state that source in the sample evidence.
 - Fibre outcome is text-only. Do not infer fibre formation from SEM images.
 - Fibre outcome must be "unclear" unless the text explicitly links that exact sample/formulation to fibre formation, beaded fibres, failure/no fibres, or not tested. Do not attach a broad molecular-weight or concentration rule to a borderline or differently named series.
@@ -127,6 +156,41 @@ Rules:
 
 Paper text:
 {clipped_text}
+""".strip()
+
+
+def build_digitization_repair_prompt(
+    paper_id: str,
+    source_pdf: str,
+    target_figure_id: str | None,
+    target_figure_caption: str | None,
+    findings: list[ExtractedFinding],
+) -> str:
+    targets = "\n".join(
+        f"- `{finding.curve_id}`: visual label `{finding.curve_visual_label or 'not supplied'}`, "
+        f"legend `{finding.curve_legend_text or 'not supplied'}`"
+        for finding in findings
+        if len(finding.points) < 3
+    )
+    return f"""
+You are repairing missing chart coordinates in a chemistry-paper extraction.
+
+Paper ID: {paper_id}
+Source PDF: {source_pdf}
+Target figure: {target_figure_id or 'the supplied chart'}
+Caption: {target_figure_caption or 'not available'}
+
+The attached images show the full page, chart crop, chart-plus-caption crop, or native graphic for this one figure.
+Return ONLY valid JSON matching the provided schema. Return one finding for every target below and no other findings.
+
+Target series:
+{targets}
+
+Rules:
+- Preserve each target `curve_id` exactly.
+- For every target, provide exactly three approximate visible points: low x, middle or turning point, and high x.
+- Use ascending x order and the axes' visible units/scales. Do not omit points merely because they are approximate.
+- Do not change sample mapping or fibre outcome; leave unrelated fields empty.
 """.strip()
 
 
@@ -144,17 +208,28 @@ def extract_paper_with_llm(
     target_figure_caption: str | None = None,
     successful_fibres_only: bool = False,
     chart_geometry: dict[str, Any] | None = None,
+    digitization_repair_for: list[ExtractedFinding] | None = None,
 ) -> PaperLLMExtraction:
-    prompt = build_extraction_prompt(
-        paper_id,
-        source_pdf,
-        text,
-        text_only=text_only,
-        attached_page=page_number,
-        target_figure_id=target_figure_id,
-        target_figure_caption=target_figure_caption,
-        successful_fibres_only=successful_fibres_only,
-        chart_geometry=chart_geometry,
+    prompt = (
+        build_digitization_repair_prompt(
+            paper_id,
+            source_pdf,
+            target_figure_id,
+            target_figure_caption,
+            digitization_repair_for,
+        )
+        if digitization_repair_for is not None
+        else build_extraction_prompt(
+            paper_id,
+            source_pdf,
+            text,
+            text_only=text_only,
+            attached_page=page_number,
+            target_figure_id=target_figure_id,
+            target_figure_caption=target_figure_caption,
+            successful_fibres_only=successful_fibres_only,
+            chart_geometry=chart_geometry,
+        )
     )
     raw = client.extract(prompt, image_paths, raw_response_path=raw_response_path)
     normalized = normalize_extraction_payload(
@@ -165,6 +240,22 @@ def extract_paper_with_llm(
         default_chart_crop_path=chart_crop_path,
     )
     return PaperLLMExtraction.model_validate(normalized)
+
+
+def merge_digitization_repair(
+    extraction: PaperLLMExtraction,
+    repair: PaperLLMExtraction,
+) -> PaperLLMExtraction:
+    repaired_points = {
+        finding.curve_id: finding.points
+        for finding in repair.findings
+        if len(finding.points) >= 2
+    }
+    findings = [
+        finding.model_copy(update={"points": repaired_points.get(finding.curve_id, finding.points)})
+        for finding in extraction.findings
+    ]
+    return extraction.model_copy(update={"findings": findings})
 
 
 def normalize_extraction_payload(
