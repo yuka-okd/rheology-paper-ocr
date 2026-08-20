@@ -22,6 +22,7 @@ def write_reports(out_dir: Path, results: list[JoinedResult], review_candidates:
         for result in results:
             row = result.model_dump(mode="json")
             row["warnings"] = "; ".join(row.get("warnings") or [])
+            row["points"] = json.dumps(row.get("points") or [])
             writer.writerow(row)
 
     reviews = review_candidates or []

@@ -5,7 +5,7 @@ import math
 from rheology_paper_ocr.schemas import DigitizedSeries, SeriesSummary
 
 
-def _ordered_points(series: DigitizedSeries) -> list[tuple[float, float]]:
+def ordered_points(series: DigitizedSeries) -> list[tuple[float, float]]:
     """Return plot points usable for endpoint and shape analysis.
 
     A zero x value is valid on common linear axes such as time. It must not be
@@ -43,7 +43,7 @@ def is_shear_rate_axis(x_axis_label: str | None) -> bool:
 def classify_series(series: DigitizedSeries, x_axis_label: str | None = None) -> str:
     if x_axis_label and not is_shear_rate_axis(x_axis_label):
         return "unclear"
-    points = _ordered_points(series)
+    points = ordered_points(series)
     if len(points) < 3:
         return "unclear"
 
@@ -73,7 +73,7 @@ def classify_series(series: DigitizedSeries, x_axis_label: str | None = None) ->
 
 
 def summarize_series(series: DigitizedSeries, x_axis_label: str | None = None) -> SeriesSummary:
-    points = _ordered_points(series)
+    points = ordered_points(series)
     summary = SeriesSummary(rheology_class=classify_series(series, x_axis_label=x_axis_label))
     if not points:
         return summary

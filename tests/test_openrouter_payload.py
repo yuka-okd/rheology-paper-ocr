@@ -666,7 +666,7 @@ def test_digitization_repair_prompt_targets_existing_series_and_requires_points(
     )
 
     assert "`curve_a`" in prompt
-    assert "exactly three approximate visible points" in prompt
+    assert "exactly five approximate visible points" in prompt
 
 
 def test_digitization_repair_only_replaces_series_with_usable_points():

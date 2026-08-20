@@ -95,9 +95,11 @@ def test_pipeline_persists_evidence_rows_and_skips_unchanged_completed_papers(mo
     assert len(calls) == 1
     assert first_results == second_results
     assert first_results[0].rheology_class == "shear-thinning"
+    assert first_results[0].points == [DataPoint(x=1, y=1000), DataPoint(x=10, y=300), DataPoint(x=100, y=80)]
     assert (out_dir / "manifest.json").exists()
     assert (out_dir / "papers" / "paper_0001" / "results.json").exists()
     assert (out_dir / "report.html").exists()
+    assert (out_dir / "combined_plots_manifest.json").exists()
 
 
 def test_pipeline_stops_after_insufficient_openrouter_credit(monkeypatch, tmp_path: Path):

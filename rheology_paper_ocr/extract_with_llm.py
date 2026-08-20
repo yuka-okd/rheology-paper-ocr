@@ -136,14 +136,14 @@ sample definitions, formulation aliases, and fibre outcome evidence.
 Return ONLY valid JSON matching the provided schema.
 
 Rules:
-- Return one compact finding per series: no explanatory prose and at most three points.
+- Return one compact finding per series: no explanatory prose and at most five points.
 - When an image is attached, only report charts visible on that page and set page to the attached page number.
 - Set x_axis_scale and y_axis_scale to "linear", "log", or "unclear". Keep points in ascending x order.
 - Return the flat finding schema directly. Do not wrap findings in a chart object or add figure captions, chart type, or trend prose.
 - Report bulk shear viscosity/stress, modulus, frequency-sweep, flow curves, and concentration-viscosity charts.
 - Exclude extensional, capillary-breakup, and filament-thinning plots.
 - Treat an axis labelled "strain rate" or "extension rate" as out of scope unless it explicitly says "shear rate".
-- Digitize at most three approximate points per series: start, turning point, and end.
+- Digitize up to five approximate points per series, spanning its full extent to capture its shape: start, ~25%, ~50% (or turning point if present), ~75%, and end.
 - On a broken x axis, use the far-right point as the end.
 - `color_traces` only cross-check count/direction, never values or legend mappings.
 - A concentration-viscosity chart is in scope, but is not a flow curve or shear-thickening.
@@ -170,7 +170,7 @@ def build_digitization_repair_prompt(
         f"- `{finding.curve_id}`: visual label `{finding.curve_visual_label or 'not supplied'}`, "
         f"legend `{finding.curve_legend_text or 'not supplied'}`"
         for finding in findings
-        if len(finding.points) < 3
+        if len(finding.points) < 5
     )
     return f"""
 You are repairing missing chart coordinates in a chemistry-paper extraction.
@@ -188,7 +188,7 @@ Target series:
 
 Rules:
 - Preserve each target `curve_id` exactly.
-- For every target, provide exactly three approximate visible points: low x, middle or turning point, and high x.
+- For every target, provide exactly five approximate visible points, evenly spanning low x to high x, capturing the curve's shape.
 - Use ascending x order and the axes' visible units/scales. Do not omit points merely because they are approximate.
 - Do not change sample mapping or fibre outcome; leave unrelated fields empty.
 """.strip()

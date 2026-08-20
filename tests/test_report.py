@@ -1,8 +1,9 @@
+import csv
 import json
 from pathlib import Path
 
 from rheology_paper_ocr.report import write_reports
-from rheology_paper_ocr.schemas import JoinedResult, ReviewCandidate
+from rheology_paper_ocr.schemas import DataPoint, JoinedResult, ReviewCandidate
 
 
 def test_writes_csv_json_and_html(tmp_path: Path):
@@ -24,6 +25,7 @@ def test_writes_csv_json_and_html(tmp_path: Path):
         y_axis_label="Viscosity",
         y_axis_unit="mPa*s",
         y_axis_scale="log",
+        points=[DataPoint(x=1, y=1000), DataPoint(x=100, y=100)],
         start_x=1,
         start_y=1000,
         end_x=100,
@@ -48,4 +50,9 @@ def test_writes_csv_json_and_html(tmp_path: Path):
     assert (tmp_path / "report.html").exists()
     data = json.loads((tmp_path / "results.json").read_text())
     assert data[0]["sample_id"] == "sample_a"
+    assert data[0]["points"] == [{"x": 1, "y": 1000}, {"x": 100, "y": 100}]
     assert "Sample A" in (tmp_path / "report.html").read_text()
+
+    with (tmp_path / "results.csv").open(newline="", encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+    assert json.loads(row["points"]) == [{"x": 1, "y": 1000}, {"x": 100, "y": 100}]

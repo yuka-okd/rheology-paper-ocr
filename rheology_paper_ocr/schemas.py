@@ -121,6 +121,7 @@ class JoinedResult(BaseModel):
     y_axis_label: str | None = None
     y_axis_unit: str | None = None
     y_axis_scale: str | None = None
+    points: list[DataPoint] = Field(default_factory=list)
     start_x: float | None = None
     start_y: float | None = None
     end_x: float | None = None

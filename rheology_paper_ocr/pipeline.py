@@ -17,13 +17,14 @@ from rheology_paper_ocr.docling_figures import (
     page_is_explicitly_non_rheology,
     select_chart_figures,
 )
+from rheology_paper_ocr.combined_plot import write_combined_plots
 from rheology_paper_ocr.openrouter_client import OpenRouterClient, OpenRouterInsufficientCreditsError
 from rheology_paper_ocr.native_graphics import inspect_native_graphics
 from rheology_paper_ocr.pdf_extract import RHEOLOGY_KEYWORDS, discover_pdfs, extract_text_and_pages, file_sha256
 from rheology_paper_ocr.report import write_reports
 from rheology_paper_ocr.review import apply_decision_policy, paper_review_candidate
-from rheology_paper_ocr.rheology_analysis import is_shear_rate_axis, series_quality_warnings, summarize_series
-from rheology_paper_ocr.schemas import DigitizedSeries, JoinedResult, ReviewCandidate, SourcePaper
+from rheology_paper_ocr.rheology_analysis import is_shear_rate_axis, ordered_points, series_quality_warnings, summarize_series
+from rheology_paper_ocr.schemas import DataPoint, DigitizedSeries, JoinedResult, ReviewCandidate, SourcePaper
 
 
 COMPLETED_STATUSES = {"completed", "completed_no_findings"}
@@ -240,6 +241,7 @@ def _finding_results(extractions, paper: SourcePaper) -> list[JoinedResult]:
                     curve_id=finding.curve_id,
                     curve_visual_label=finding.curve_visual_label,
                     curve_legend_text=finding.curve_legend_text,
+                    points=[DataPoint(x=x, y=y) for x, y in ordered_points(series)],
                     sample_id=finding.sample.sample_id,
                     sample_display_name=finding.sample.sample_display_name,
                     sample_composition=finding.sample.sample_composition,
@@ -484,7 +486,7 @@ def _run_papers(
                     successful_fibres_only=successful_fibres_only,
                     chart_geometry=chart_geometry,
                 )
-                missing_points = [finding for finding in extraction.findings if len(finding.points) < 3]
+                missing_points = [finding for finding in extraction.findings if len(finding.points) < 5]
                 if target_figure is not None and missing_points:
                     repair = extract_paper_with_llm(
                         client,
@@ -575,4 +577,5 @@ def _run_papers(
     all_results = _flatten_results(results_by_paper, papers)
     _write_manifest(out_dir, manifest)
     write_reports(out_dir, all_results, _flatten_reviews(reviews_by_paper, papers))
+    write_combined_plots(out_dir, all_results)
     return all_results
