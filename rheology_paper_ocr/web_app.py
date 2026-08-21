@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import html
 import io
+import os
 import shutil
 import tempfile
 import threading
@@ -17,6 +18,7 @@ from rheology_paper_ocr.web_store import LocalRunStore, read_json
 
 MAX_ARCHIVE_PDFS = 1_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
+DATA_DIR_ENV = "RHEOLOGY_PAPER_OCR_DATA_DIR"
 
 
 def create_app(data_dir: Path):
@@ -191,7 +193,20 @@ def create_app(data_dir: Path):
     return app
 
 
-def serve_local_app(data_dir: Path, host: str, port: int, open_browser: bool) -> None:
+def create_app_from_env():
+    """Build the app from the environment, for uvicorn's reloader.
+
+    Reloading requires uvicorn to import the app by name in a fresh process,
+    so the data directory travels through the environment rather than an
+    argument.
+    """
+    data_dir = os.environ.get(DATA_DIR_ENV)
+    if not data_dir:
+        raise RuntimeError(f"{DATA_DIR_ENV} must be set to serve with reloading.")
+    return create_app(Path(data_dir))
+
+
+def serve_local_app(data_dir: Path, host: str, port: int, open_browser: bool, reload: bool = False) -> None:
     try:
         import uvicorn
     except ImportError as exc:
@@ -200,6 +215,21 @@ def serve_local_app(data_dir: Path, host: str, port: int, open_browser: bool) ->
         raise ValueError("The browser app only supports a loopback host so uploaded papers and API keys remain local.")
     if open_browser:
         threading.Timer(0.8, lambda: webbrowser.open(f"http://{host}:{port}")).start()
+    if reload:
+        # An extraction runs on a background thread, so a reload mid-run drops
+        # it. Startup calls pause_orphaned_runs, which parks those runs as
+        # paused for the resume control rather than leaving them "running".
+        os.environ[DATA_DIR_ENV] = str(data_dir)
+        uvicorn.run(
+            "rheology_paper_ocr.web_app:create_app_from_env",
+            factory=True,
+            host=host,
+            port=port,
+            log_level="info",
+            reload=True,
+            reload_dirs=[str(Path(__file__).parent)],
+        )
+        return
     uvicorn.run(create_app(data_dir), host=host, port=port, log_level="info")
 
 

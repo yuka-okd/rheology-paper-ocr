@@ -72,9 +72,10 @@ def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Loopback bind address for local-only access."),
     port: int = typer.Option(8787, "--port", min=1, max=65535, help="Local browser port."),
     open_browser: bool = typer.Option(True, "--open/--no-open", help="Open the local browser application automatically."),
+    reload: bool = typer.Option(False, "--reload", help="Restart the server when the source changes. An in-progress extraction is paused by a reload."),
 ):
     """Launch the local browser workflow for upload, review, and export."""
-    serve_local_app(data_dir=data_dir, host=host, port=port, open_browser=open_browser)
+    serve_local_app(data_dir=data_dir, host=host, port=port, open_browser=open_browser, reload=reload)
 
 
 @app.command()
