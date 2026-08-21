@@ -136,14 +136,14 @@ sample definitions, formulation aliases, and fibre outcome evidence.
 Return ONLY valid JSON matching the provided schema.
 
 Rules:
-- Return one compact finding per series: no explanatory prose and at most five points.
+- Return one compact finding per series: no explanatory prose and at most three points.
 - When an image is attached, only report charts visible on that page and set page to the attached page number.
 - Set x_axis_scale and y_axis_scale to "linear", "log", or "unclear". Keep points in ascending x order.
 - Return the flat finding schema directly. Do not wrap findings in a chart object or add figure captions, chart type, or trend prose.
 - Report bulk shear viscosity/stress, modulus, frequency-sweep, flow curves, and concentration-viscosity charts.
 - Exclude extensional, capillary-breakup, and filament-thinning plots.
 - Treat an axis labelled "strain rate" or "extension rate" as out of scope unless it explicitly says "shear rate".
-- Digitize up to five approximate points per series, spanning its full extent to capture its shape: start, ~25%, ~50% (or turning point if present), ~75%, and end.
+- Digitize at most three approximate points per series: start, turning point, and end.
 - On a broken x axis, use the far-right point as the end.
 - `color_traces` only cross-check count/direction, never values or legend mappings.
 - A concentration-viscosity chart is in scope, but is not a flow curve or shear-thickening.
@@ -166,6 +166,14 @@ def build_digitization_repair_prompt(
     target_figure_caption: str | None,
     findings: list[ExtractedFinding],
 ) -> str:
+    """Ask for the denser point set the combined plots need.
+
+    This pass deliberately requests more points than `build_extraction_prompt`.
+    Asking the main extraction for five points crowded out its fibre-evidence
+    rules and every curve came back with an unresolved fibre outcome, so point
+    density is bought here instead, where `merge_digitization_repair` keeps the
+    response confined to `points`.
+    """
     targets = "\n".join(
         f"- `{finding.curve_id}`: visual label `{finding.curve_visual_label or 'not supplied'}`, "
         f"legend `{finding.curve_legend_text or 'not supplied'}`"
