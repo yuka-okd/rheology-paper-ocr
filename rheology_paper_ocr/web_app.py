@@ -264,12 +264,21 @@ def _run_detail(run: dict, store: LocalRunStore) -> dict:
         crop_path = row.get("chart_crop_path")
         row["chart_url"] = f"/api/runs/{run['id']}/files/{crop_path}" if crop_path else None
         review_rows.append(row)
+    combined_plots = []
+    for group in read_json(output_dir / "combined_plots_manifest.json", {"groups": []}).get("groups", []):
+        combined_plots.append(
+            {
+                "label": f"{group.get('y_label', '?').title()} vs {group.get('x_label', '?').title()}",
+                "url": f"/api/runs/{run['id']}/files/{group['plot_path']}",
+            }
+        )
     return {
         "run": _run_summary(run),
         "manifest": manifest,
         "progress": _run_progress(run, manifest),
         "results": results,
         "review_queue": review_rows,
+        "combined_plots": combined_plots,
         "export_csv_url": f"/api/runs/{run['id']}/export.csv",
         "print_url": f"/api/runs/{run['id']}/print",
     }

@@ -53,6 +53,7 @@ function renderDetail() {
   $('#empty-state').classList.add('hidden'); $('#run-view').classList.remove('hidden'); $('#actions').classList.remove('hidden');
   $('#run-title').textContent = run.name; $('#run-subtitle').textContent = `${run.completed_papers}/${run.paper_count} papers completed`;
   $('#csv-export').href = state.detail.export_csv_url; $('#print-export').href = state.detail.print_url;
+  $('#combined-plots-button').classList.toggle('hidden', !state.detail.combined_plots.length);
   const status = $('#status-banner'); status.className = 'status-banner';
   status.textContent = run.error || ({ ready: 'Ready to extract.', running: 'Extraction is running locally. Paper rows update as each completes.', paused: 'Extraction is paused. Resume it from the run list.', completed: run.retryable_papers ? `${run.retryable_papers} paper${run.retryable_papers === 1 ? '' : 's'} can be retried from the run list.` : 'Extraction completed. Review rows before export.', blocked: 'Extraction paused because provider credit is exhausted. Add credit, then retry unfinished papers.', failed: 'Extraction stopped unexpectedly. Retry unfinished papers from the run list.' }[run.status] || run.status);
   if (['blocked', 'failed'].includes(run.status)) status.classList.add('error'); else if (run.status === 'running' || review_queue.length) status.classList.add('warning');
@@ -105,6 +106,13 @@ function openReview(row) {
   $('#review-evidence').textContent = row.fibre_evidence_text || 'No direct fibre evidence was extracted.';
   $('#review-warnings').innerHTML = (row.warnings || []).map(warning => `<li>${escape(warning)}</li>`).join('') || '<li>No extraction warnings.</li>';
   $('#review-note').value = row.reviewer_note || '';
+}
+
+function openCombinedPlots() {
+  $('#combined-plots-gallery').innerHTML = state.detail.combined_plots.map(plot =>
+    `<figure><img src="${plot.url}" alt="${escape(plot.label)}"><figcaption>${escape(plot.label)}</figcaption></figure>`
+  ).join('');
+  $('#combined-plots-dialog').showModal();
 }
 
 async function saveDecision(decision) {
@@ -171,5 +179,6 @@ dropzone.addEventListener('drop', event => { if (!event.dataTransfer?.files.leng
 const savedApiKey = localStorage.getItem(apiKeyStorageKey); if (savedApiKey) { $('#openrouter-key').value = savedApiKey; $('#remember-key').checked = true; }
 $('#resume-form').addEventListener('submit', event => { event.preventDefault(); if (event.submitter?.value === 'cancel') { $('#resume-dialog').close(); return; } const apiKey = $('#resume-api-key').value.trim(); if (!apiKey) { $('#resume-error').textContent = 'Enter an OpenRouter API key to resume extraction.'; $('#resume-error').classList.remove('hidden'); $('#resume-api-key').focus(); return; } if ($('#resume-remember-key').checked) localStorage.setItem(apiKeyStorageKey, apiKey); resumeRun(state.resumeRunId, apiKey); });
 $('#close-review').addEventListener('click', () => $('#review-panel').classList.add('hidden')); document.querySelectorAll('[data-decision]').forEach(button => button.addEventListener('click', () => saveDecision(button.dataset.decision)));
+$('#combined-plots-button').addEventListener('click', openCombinedPlots); $('#close-combined-plots').addEventListener('click', () => $('#combined-plots-dialog').close());
 document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => { document.querySelectorAll('.tab').forEach(item => item.classList.remove('active')); tab.classList.add('active'); state.filter = tab.dataset.filter; renderTable(); }));
 loadRuns().catch(error => { console.error(error); $('#run-subtitle').textContent = error.message; });

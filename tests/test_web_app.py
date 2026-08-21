@@ -76,6 +76,53 @@ def test_browser_api_uploads_papers_persists_decisions_and_exports_csv(tmp_path:
     assert "accepted" in exported.text
 
 
+def test_browser_run_detail_exposes_combined_plot_urls(tmp_path: Path):
+    client = TestClient(create_app(tmp_path))
+    created = client.post(
+        "/api/runs",
+        files=[("files", ("paper.pdf", b"%PDF-1.4\n", "application/pdf"))],
+    )
+    run_id = created.json()["run"]["id"]
+    output_dir = Path(LocalRunStore(tmp_path).get_run(run_id)["output_dir"])
+    (output_dir / "combined_plots").mkdir(parents=True)
+    (output_dir / "combined_plots" / "viscosity_vs_shear_rate.png").write_bytes(b"fake-png")
+    (output_dir / "combined_plots_manifest.json").write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {
+                        "x_label": "shear rate",
+                        "y_label": "viscosity",
+                        "plot_path": "combined_plots/viscosity_vs_shear_rate.png",
+                    }
+                ],
+                "excluded": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    detail = client.get(f"/api/runs/{run_id}").json()
+
+    assert detail["combined_plots"] == [
+        {"label": "Viscosity vs Shear Rate", "url": f"/api/runs/{run_id}/files/combined_plots/viscosity_vs_shear_rate.png"}
+    ]
+    plot = client.get(detail["combined_plots"][0]["url"])
+    assert plot.status_code == 200
+    assert plot.content == b"fake-png"
+
+
+def test_browser_run_detail_has_no_combined_plots_without_a_manifest(tmp_path: Path):
+    client = TestClient(create_app(tmp_path))
+    created = client.post(
+        "/api/runs",
+        files=[("files", ("paper.pdf", b"%PDF-1.4\n", "application/pdf"))],
+    )
+    run_id = created.json()["run"]["id"]
+
+    assert client.get(f"/api/runs/{run_id}").json()["combined_plots"] == []
+
+
 def test_browser_client_handles_empty_delete_responses():
     app_js = (Path(__file__).parents[1] / "rheology_paper_ocr" / "ui" / "app.js").read_text(encoding="utf-8")
 

@@ -21,6 +21,7 @@
         <div id="actions" class="actions hidden">
           <a id="csv-export" class="icon-button" title="Export CSV" download>CSV</a>
           <a id="print-export" class="icon-button" title="Print or save as PDF" target="_blank">PDF</a>
+          <button id="combined-plots-button" class="icon-button hidden" title="View combined plots">Plots</button>
         </div>
       </header>
       <section id="empty-state" class="empty-state">
@@ -84,6 +85,10 @@
       <div id="resume-error" class="form-error hidden"></div>
       <button id="resume-submit" class="primary wide" value="default">Resume run</button>
     </form>
+  </dialog>
+  <dialog id="combined-plots-dialog">
+    <div class="dialog-header"><div><div class="eyebrow">Run summary</div><h2>Combined plots</h2></div><button id="close-combined-plots" class="close" title="Close">×</button></div>
+    <div id="combined-plots-gallery" class="plot-gallery"></div>
   </dialog>
   <script src="/static/app.js"></script>
 </body>
