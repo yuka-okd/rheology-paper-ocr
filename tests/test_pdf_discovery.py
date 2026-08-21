@@ -24,7 +24,10 @@ def test_ranks_pages_with_multiple_rheology_signals_first():
         "Results. Storage modulus and loss modulus were measured during a frequency sweep.",
     ]
 
-    assert select_candidate_page_indexes(pages, max_candidate_pages=2) == [2, 1]
+    # Both rheology pages outrank the passing mention in the methods, and the
+    # page carrying the figure leads: pages are rendered to digitize the charts
+    # on them, so holding a chart beats discussing one.
+    assert select_candidate_page_indexes(pages, max_candidate_pages=2) == [1, 2]
 
 
 def test_ranks_a_results_page_above_an_abstract_that_name_drops_each_term_once():
@@ -42,3 +45,19 @@ def test_ranks_a_results_page_above_an_abstract_that_name_drops_each_term_once()
     )
 
     assert select_candidate_page_indexes([abstract, filler, results], max_candidate_pages=1) == [2]
+
+
+def test_ranks_a_figure_page_above_the_prose_that_discusses_it():
+    """A page is chosen for the chart it holds, not for talking about one.
+
+    A page given over to a figure carries little text, so keyword counts alone
+    rank it below the discussion pages, and the chart is never rendered.
+    """
+    discussion = (
+        "The apparent viscosity fell as shear rate rose. Viscosity and shear "
+        "thinning are discussed here, and the shear response of every sample "
+        "was compared against its viscosity at low shear."
+    )
+    figure_page = "Fig. 3. Variation in (a) apparent viscosity, (b) conductivity, with polymer content."
+
+    assert select_candidate_page_indexes([discussion, figure_page], max_candidate_pages=1) == [1]

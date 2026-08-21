@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 import fitz
@@ -40,6 +41,17 @@ PAGE_KEYWORD_WEIGHTS = {
 
 PAGE_KEYWORD_OCCURRENCE_CAP = 3
 
+# A caption naming a rheology quantity means the chart is on that page, which
+# is far better evidence than prose mentions. Such a page also needs the help:
+# it is mostly given over to the figure, so it carries little text and keyword
+# counts rank it below the discussion pages that merely talk about the charts.
+RHEOLOGY_FIGURE_CAPTION = re.compile(
+    r"fig(?:ure)?\.?\s*\d+[.:]\s[^\n]{0,200}?"
+    r"(?:viscos|shear|rheolog|modulus|flow curve|flow behaviour|flow behavior|stress|strain)",
+    re.IGNORECASE,
+)
+RHEOLOGY_FIGURE_CAPTION_BONUS = 12
+
 # Candidate figures can occupy only a small part of a journal page.  A low-DPI
 # page render makes marker/legend association and log-scale digitization guesswork.
 PAGE_RENDER_SCALE = 3.0
@@ -68,16 +80,16 @@ def select_candidate_page_indexes(page_texts: list[str], max_candidate_pages: in
     # page, so the page holding the charts is never rendered. The per-term cap
     # keeps one heavily repeated word from crowding out a page that covers
     # several of them.
-    scored = [
-        (
-            index,
-            sum(
-                weight * min(text.lower().count(keyword), PAGE_KEYWORD_OCCURRENCE_CAP)
-                for keyword, weight in PAGE_KEYWORD_WEIGHTS.items()
-            ),
+    scored = []
+    for index, text in enumerate(page_texts):
+        lowered = text.lower()
+        score = sum(
+            weight * min(lowered.count(keyword), PAGE_KEYWORD_OCCURRENCE_CAP)
+            for keyword, weight in PAGE_KEYWORD_WEIGHTS.items()
         )
-        for index, text in enumerate(page_texts)
-    ]
+        if RHEOLOGY_FIGURE_CAPTION.search(text):
+            score += RHEOLOGY_FIGURE_CAPTION_BONUS
+        scored.append((index, score))
     relevant = [(index, score) for index, score in scored if score]
     if not relevant:
         return list(range(min(len(page_texts), max_candidate_pages)))
