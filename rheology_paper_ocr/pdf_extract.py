@@ -38,6 +38,8 @@ PAGE_KEYWORD_WEIGHTS = {
     "nanofibre": 1,
 }
 
+PAGE_KEYWORD_OCCURRENCE_CAP = 3
+
 # Candidate figures can occupy only a small part of a journal page.  A low-DPI
 # page render makes marker/legend association and log-scale digitization guesswork.
 PAGE_RENDER_SCALE = 3.0
@@ -60,8 +62,20 @@ def file_sha256(path: Path) -> str:
 
 
 def select_candidate_page_indexes(page_texts: list[str], max_candidate_pages: int = 3) -> list[int]:
+    # Score on how often each term appears, not merely whether it appears. An
+    # abstract that names every term once otherwise outranks the results page
+    # that discusses viscosity throughout, and ties resolve to the earlier
+    # page, so the page holding the charts is never rendered. The per-term cap
+    # keeps one heavily repeated word from crowding out a page that covers
+    # several of them.
     scored = [
-        (index, sum(weight for keyword, weight in PAGE_KEYWORD_WEIGHTS.items() if keyword in text.lower()))
+        (
+            index,
+            sum(
+                weight * min(text.lower().count(keyword), PAGE_KEYWORD_OCCURRENCE_CAP)
+                for keyword, weight in PAGE_KEYWORD_WEIGHTS.items()
+            ),
+        )
         for index, text in enumerate(page_texts)
     ]
     relevant = [(index, score) for index, score in scored if score]

@@ -25,3 +25,20 @@ def test_ranks_pages_with_multiple_rheology_signals_first():
     ]
 
     assert select_candidate_page_indexes(pages, max_candidate_pages=2) == [2, 1]
+
+
+def test_ranks_a_results_page_above_an_abstract_that_name_drops_each_term_once():
+    """A page discussing viscosity throughout outranks one merely listing the terms.
+
+    Scoring on keyword presence alone tied these, and the tie resolved to the
+    earlier page, so the page carrying the flow curves was never rendered.
+    """
+    abstract = "Abstract. We report rheology, viscosity, shear, and flow curve data for electrospun fibre mats."
+    filler = "References and acknowledgements."
+    results = (
+        "Figure 3. The viscosity decreased with shear rate. "
+        "Viscosity values fell as shear rate rose, and the viscosity of each "
+        "sample tracked the shear thinning seen in the shear sweep."
+    )
+
+    assert select_candidate_page_indexes([abstract, filler, results], max_candidate_pages=1) == [2]
